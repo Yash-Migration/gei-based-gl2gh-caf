@@ -1,3 +1,2 @@
 Namespace,Project,Commit_Count,Branch_Count,Full_URL,github_org,github_repo
-test-migration,test-project,2,1,https://code.siemens.com/test-migration/test-project,OSES-Migration,DryRun-test-project3
-test-migration,test-project2,1,1,https://code.siemens.com/test-migration/test-project2,OSES-Migration,DryRun-test-project4
+test-division,Testlab,2,1,https://gitlab-ie.industrysoftware.automation.siemens.com/test-division/testlab/testlab,OSES-Migration,DryRun-20260611-testlab
