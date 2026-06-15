@@ -267,4 +267,3 @@ echo "Detailed logs written to $LOG_FILE"
 echo
 echo "Run the below command to set env variable before running next script"
 echo "export UPLOADED_ARCHIVES=$PRESIGNED_CSV"
-echo
