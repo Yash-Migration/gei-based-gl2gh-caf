@@ -1,5 +1,8 @@
 name: GitLab to GitHub Migration Pipeline
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
