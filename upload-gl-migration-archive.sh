@@ -15,7 +15,7 @@ fi
 if [[ "$GITHUB_TYPE" == "GitHub" ]]; then
     GH_SERVER_URL="https://github.com"
     GH_API_URL="https://api.github.com"
-    
+
 elif [[ "$GITHUB_TYPE" == "GitHubDR" ]]; then
     GH_SERVER_URL="https://${GH_HOST}"
     GH_API_URL="https://api.${GH_HOST}"
@@ -70,7 +70,7 @@ mkdir -p "$ARTIFACTS_DIR"
 
 # --- Output list file ---> # Timestamp to make output filenames unique per run.
 PRESIGNED_CSV="$ARTIFACTS_DIR/presigned-urls_${RUN_TS}.csv"
-echo 'gitlab_group,gitlab_project,archive_file_path,archive_file_name,presigned_url,github_org,github_repo' > "$PRESIGNED_CSV"
+echo 'gitlab_group,gitlab_project,archive_file_path,archive_file_name,presigned_url,github_org,github_repo,gh_repo_visibility' > "$PRESIGNED_CSV"
 
 # --- Basic checks ---
 if [[ ! -s "$ARCHIVE_LIST" ]]; then
@@ -181,6 +181,7 @@ GL_PRJ_IDX="$(find_col 'gitlab_project')" || array_of_err_messages+=("[ERROR] Mi
 ARC_PATH_IDX="$(find_col 'archive_file')" || array_of_err_messages+=("[ERROR] Missing required header: archive_file")
 GH_ORG_IDX="$(find_col "github_org")" || array_of_err_messages+=("[ERROR] Missing required header: github_org")
 GH_REPO_IDX="$(find_col "github_repo")" || array_of_err_messages+=("[ERROR] Missing required header: github_repo")
+GH_REPO_VISIBILITY_IDX="$(find_col "gh_repo_visibility")" || array_of_err_messages+=("[ERROR] Missing required header: gh_repo_visibility")
 
 if ((${#array_of_err_messages[@]})); then
   {
@@ -204,10 +205,18 @@ while IFS= read -r raw; do
   archive_path="$(dequote "${flds[$ARC_PATH_IDX]:-}")"
   github_org="$(dequote "${flds[$GH_ORG_IDX]:-}")"
   github_repo="$(dequote "${flds[$GH_REPO_IDX]:-}")"
+  gh_repo_visibility="$(dequote "${flds[$GH_REPO_VISIBILITY_IDX]:-}")"
+
+  if [[ "$gh_repo_visibility" != "private" && "$gh_repo_visibility" != "public" && "$gh_repo_visibility" != "internal" ]]; then
+    echo "[ERROR] Invalid gh_repo_visibility: '$gh_repo_visibility'"
+    echo "[ERROR] Valid values: private, public, internal"
+    fail=$((fail + 1))
+    continue
+  fi
 
   total=$((total + 1))
 
-  [[ -z "$ns" || -z "$pr" || -z "$archive_path" || -z "$github_org" || -z "$github_repo"  ]] && skipped=$((skipped+1)) && echo "[WARN] Row: ${total} - Skipping due to missing headers: gitlab_group='${ns}' gitlab_project='${pr}' archive_path='${archive_path}' github_org='${github_org}' github_repo='${github_repo}'" && continue   # Skip rows that don’t have both Namespace, Project, GitHub Org and GitHub repo
+  [[ -z "$ns" || -z "$pr" || -z "$archive_path" || -z "$github_org" || -z "$github_repo"  || -z "$gh_repo_visibility" ]] && skipped=$((skipped+1)) && echo "[WARN] Row: ${total} - Skipping due to missing headers: gitlab_group='${ns}' gitlab_project='${pr}' archive_path='${archive_path}' github_org='${github_org}' github_repo='${github_repo}' gh_repo_visibility='${gh_repo_visibility}'" && continue   # Skip rows that don’t have both Namespace, Project, GitHub Org and GitHub repo
 
   if [[ ! -f "$archive_path" ]]; then
     echo "[ERROR] Missing: $archive_path"
@@ -232,11 +241,11 @@ while IFS= read -r raw; do
   # Running upload script
   script_status_check=0
   out="$("$UPLOAD_SCRIPT")" 2>&1 || script_status_check=$?
-  
+
   if (( $script_status_check == 0 )); then
     url="$(extract_url "$out")"
     if [[ -n "$url" ]]; then
-      echo "\"$ns\",\"$pr\",\"$archive_path\",\"$TARGET_GH_REPO\",\"$url\",\"$github_org\",\"$github_repo\"" >> "$PRESIGNED_CSV"
+      echo "\"$ns\",\"$pr\",\"$archive_path\",\"$TARGET_GH_REPO\",\"$url\",\"$github_org\",\"$github_repo\",\"$gh_repo_visibility\"" >> "$PRESIGNED_CSV"
       ok=$((ok + 1))
     else
       echo "[ERROR] Cannot detect pre-signed url in output for: $TARGET_GH_REPO"
@@ -267,4 +276,4 @@ echo "Detailed logs written to $LOG_FILE"
 echo
 echo "Run the below command to set env variable before running next script"
 echo "export UPLOADED_ARCHIVES=$PRESIGNED_CSV"
-echo
+ 
