@@ -616,13 +616,23 @@ class GHApi {
         }
       }`
 
+      const repoVisibility = (
+        process.env.GH_REPO_VISIBILITY || 'private'
+      ).toLowerCase()
+
+      if (!['private', 'public', 'internal'].includes(repoVisibility)) {
+        throw new Error(
+          `Invalid GH_REPO_VISIBILITY '${repoVisibility}'. Valid values: private, public, internal`
+        )
+      }
+
       let variables = {
         sourceId: sourceId,
         ownerId: organizationId,
         repositoryName: repositoryName,
         continueOnError: true,
         githubPat: this.ghPAT,
-        targetRepoVisibility: 'private',
+        targetRepoVisibility: repoVisibility,
         sourceRepositoryUrl: glArchiveUrl,
         gitArchiveUrl: signedArchiveUrl,
         metadataArchiveUrl: signedArchiveUrl,
@@ -680,12 +690,12 @@ class GHApi {
   async getECIMigrationStatus({ owner, migrationGUID }) {
     return await this.handleRateLimitingAndErrors(async () => {
       let query = `query ($organization: String!, $guid: String!) {
-	      organization(login: $organization) {
-		      migration(guid: $guid) {
-			      state
-			      databaseId
-		      }
-	      }
+              organization(login: $organization) {
+                      migration(guid: $guid) {
+                              state
+                              databaseId
+                      }
+              }
       }`
 
       let variables = {

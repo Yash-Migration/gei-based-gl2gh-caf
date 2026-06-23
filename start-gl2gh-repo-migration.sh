@@ -56,8 +56,8 @@ MIGRATION_OUTPUT_FILE="${ARTIFACTS_DIR}/migration-outputs_${RUN_TS}.csv"
 MIGRATION_FAILURE_FILE="${ARTIFACTS_DIR}/migration-failures_${RUN_TS}.csv"
 MIGRATION_ENVS_FILE="${ARTIFACTS_DIR}/migration-envs_${RUN_TS}.txt"
 
-echo "gitlab_group,gitlab_project,github_org,github_repository,migration_source_id,migration_id" > "${MIGRATION_OUTPUT_FILE}"
-echo "gitlab_group,gitlab_project,github_org,github_repository_archive,migration_source_id,migration_id" > "${MIGRATION_FAILURE_FILE}"
+echo "gitlab_group,gitlab_project,github_org,github_repository,gh_repo_visibility,migration_source_id,migration_id" > "${MIGRATION_OUTPUT_FILE}"
+echo "gitlab_group,gitlab_project,github_org,github_repository_archive,gh_repo_visibility,migration_source_id,migration_id" > "${MIGRATION_FAILURE_FILE}"
 
 # --- Helpers
 # Remove leading/trailing double-quotes and trailing CR from a field.
@@ -114,6 +114,7 @@ append_env_details() {
     echo "export SOURCE_GL_PROJECT=${SOURCE_GL_PROJECT:-}"
     echo "export GH_ORG=${GH_ORG:-}"
     echo "export GH_REPO_NAME=${GH_REPO_NAME:-}"
+    echo "export GH_REPO_VISIBILITY=${GH_REPO_VISIBILITY:-}"
     echo "export PRESIGNED_URL=${PRESIGNED_URL:-}"
     echo "export TARGET_GH_ORG=${TARGET_GH_ORG:-}"
     echo "export TARGET_GH_ORG_ID=${TARGET_GH_ORG_ID:-}"
@@ -154,12 +155,13 @@ TGT_REPO_IDX="$(find_col 'archive_file_name')" || array_of_err_messages+=("[ERRO
 URL_IDX="$(find_col 'presigned_url')" || array_of_err_messages+=("[ERROR] Missing required header: presigned_url")
 ORG_IDX="$(find_col 'github_org')" || array_of_err_messages+=("[ERROR] Missing required header: github_org")
 REPO_IDX="$(find_col 'github_repo')" || array_of_err_messages+=("[ERROR] Missing required header: github_repo")
+GH_REPO_VISIBILITY_IDX="$(find_col 'gh_repo_visibility')" || array_of_err_messages+=("[ERROR] Missing required header: gh_repo_visibility")
 
 
 if ((${#array_of_err_messages[@]})); then
   {
     printf '%s\n' "${array_of_err_messages[@]}"
-    echo "[ERROR] Header must contain 'gitlab_group', 'gitlab_project', 'archive_file_path', 'archive_file_name', 'presigned_url', 'github_org', 'github_repo' "
+    echo "[ERROR] Header must contain 'gitlab_group', 'gitlab_project', 'archive_file_path', 'archive_file_name', 'presigned_url', 'github_org', 'github_repo', 'gh_repo_visibility' "
   } >&2
   exit 1
 fi
@@ -210,19 +212,20 @@ process_rows() {
     presigned_url="$(dequote "${flds[$URL_IDX]:-}")"
     github_org="$(dequote "${flds[$ORG_IDX]:-}")"
     github_repo_name="$(dequote "${flds[$REPO_IDX]:-}")"
+    gh_repo_visibility="$(dequote "${flds[$GH_REPO_VISIBILITY_IDX]:-}")"
 
     TOT=$((TOT+1))
 
     # minimal guard
     if [[ -z "$gitlab_group" || -z "$project" || -z "$presigned_url" || \
-          -z "$archive_file_name" || -z "$github_org" || -z "$github_repo_name" ]]; then
+          -z "$archive_file_name" || -z "$github_org" || -z "$github_repo_name" || -z "$gh_repo_visibility" ]]; then
       SKIP=$((SKIP+1))
-      echo "[WARN] Row ${TOT} - Skipping due to missing headers: gitlab_group='${gitlab_group}' gitlab_project='${project}' presigned_url='${presigned_url}' archive_file_name='${archive_file_name}' github_org='${github_org}' github_repo='${github_repo_name}'"
+      echo "[WARN] Row ${TOT} - Skipping due to missing headers: gitlab_group='${gitlab_group}' gitlab_project='${project}' presigned_url='${presigned_url}' archive_file_name='${archive_file_name}' github_org='${github_org}' github_repo='${github_repo_name}' gh_repo_visibility='${gh_repo_visibility}' "
       continue
     fi
 
     # reset per-row env
-    unset PRESIGNED_URL SOURCE_GL_NAMESPACE SOURCE_GL_PROJECT MIGRATION TARGET_GH_ORG_ID ARCHIVE_FILE_NAME GH_ORG GH_REPO_NAME MIGRATION_SOURCE_ID MIGRATION_ID
+    unset PRESIGNED_URL SOURCE_GL_NAMESPACE SOURCE_GL_PROJECT MIGRATION TARGET_GH_ORG_ID ARCHIVE_FILE_NAME GH_ORG GH_REPO_NAME MIGRATION_SOURCE_ID MIGRATION_ID GH_REPO_VISIBILITY
 
     # export row inputs
     export PRESIGNED_URL="${presigned_url}"
@@ -231,6 +234,7 @@ process_rows() {
     export ARCHIVE_FILE_NAME="${archive_file_name}"
     export GH_ORG="${github_org}"
     export GH_REPO_NAME="${github_repo_name}"
+    export GH_REPO_VISIBILITY="${gh_repo_visibility}"
     export MIGRATION="$(printf '{"type":"gitlab","sourceRepoUrl":"%s","ghRepoName":"%s"}' "${SOURCE_GL_SERVER_URL%/}/${gitlab_group}/${project}.git" "${github_repo_name}")"
 
     echo "[INFO] Executing migration scripts for GitLab Group: ${gitlab_group} ; GitLab Project: ${project}"
@@ -239,7 +243,7 @@ process_rows() {
     pushd "$MIGRATION_SCRIPTS" >/dev/null
     if ! run_step "$MIGRATION_SCRIPTS/create-env-vars.js"; then
       echo "[ERROR] Fail: create-env-vars.js ${gitlab_group}/${project}"
-      echo "${gitlab_group},${project},${GH_ORG},${ARCHIVE_FILE_NAME},${MIGRATION_SOURCE_ID:-},${MIGRATION_ID:-}" >> "${MIGRATION_FAILURE_FILE}"
+      echo "${gitlab_group},${project},${GH_ORG},${ARCHIVE_FILE_NAME},${GH_REPO_VISIBILITY},${MIGRATION_SOURCE_ID:-},${MIGRATION_ID:-}" >> "${MIGRATION_FAILURE_FILE}"
       append_env_details "$gitlab_group" "$project" "${MIGRATION_ENVS_FILE}"
       FAIL=$((FAIL+1))
       popd >/dev/null
@@ -261,7 +265,7 @@ process_rows() {
     pushd "$MIGRATION_SCRIPTS" >/dev/null
     if ! run_step "$MIGRATION_SCRIPTS/create-migration-source.js"; then
       echo "[ERROR] Fail: create-migration-source.js ${gitlab_group}/${project}"
-      echo "${gitlab_group},${project},${GH_ORG},${ARCHIVE_FILE_NAME},${MIGRATION_SOURCE_ID:-},${MIGRATION_ID:-}" >> "${MIGRATION_FAILURE_FILE}"
+      echo "${gitlab_group},${project},${GH_ORG},${ARCHIVE_FILE_NAME},${GH_REPO_VISIBILITY},${MIGRATION_SOURCE_ID:-},${MIGRATION_ID:-}" >> "${MIGRATION_FAILURE_FILE}"
       append_env_details "$gitlab_group" "$project" "${MIGRATION_ENVS_FILE}"
       FAIL=$((FAIL+1))
       popd >/dev/null
@@ -282,7 +286,7 @@ process_rows() {
     pushd "$MIGRATION_SCRIPTS" >/dev/null
     if ! run_step "$MIGRATION_SCRIPTS/start-repo-migration.js"; then
       echo "[ERROR] Fail: start-repo-migration.js ${gitlab_group}/${project}"
-      echo "${gitlab_group},${project},${GH_ORG},${ARCHIVE_FILE_NAME},${MIGRATION_SOURCE_ID:-},${MIGRATION_ID:-}" >> "${MIGRATION_FAILURE_FILE}"
+      echo "${gitlab_group},${project},${GH_ORG},${ARCHIVE_FILE_NAME},${GH_REPO_VISIBILITY},${MIGRATION_SOURCE_ID:-},${MIGRATION_ID:-}" >> "${MIGRATION_FAILURE_FILE}"
       append_env_details "$gitlab_group" "$project" "${MIGRATION_ENVS_FILE}"
       FAIL=$((FAIL+1))
       popd >/dev/null
@@ -300,7 +304,7 @@ process_rows() {
     fi
 
     MIG_IDS+=("${MIGRATION_ID}")
-    echo "${gitlab_group},${project},${GH_ORG},${GH_REPO_NAME},${MIGRATION_SOURCE_ID},${MIGRATION_ID}" >> "${MIGRATION_OUTPUT_FILE}"
+    echo "${gitlab_group},${project},${GH_ORG},${GH_REPO_NAME},${GH_REPO_VISIBILITY},${MIGRATION_SOURCE_ID},${MIGRATION_ID}" >> "${MIGRATION_OUTPUT_FILE}"
     append_env_details "$gitlab_group" "$project" "${MIGRATION_ENVS_FILE}"
     OK=$((OK+1))
 
@@ -334,4 +338,3 @@ print_summary() {
 # --- Run ---
 process_rows
 print_summary
-
