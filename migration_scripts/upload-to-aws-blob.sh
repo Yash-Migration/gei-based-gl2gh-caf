@@ -150,13 +150,8 @@ PY
 
   echo "PRESIGNED_URL=${PRESIGNED_URL}"
   echo "Archive Upload URL: ${PRESIGNED_URL}"
+  echo "PRESIGNED_URL=$PRESIGNED_URL" >>"$GITHUB_ENV"
 
-  # If running inside GitHub Actions, persist for next steps
-  if [[ -n "${GITHUB_ENV:-}" ]]; then
-    echo "PRESIGNED_URL=${PRESIGNED_URL}" >> "$GITHUB_ENV"
-    echo "Wrote PRESIGNED_URL to GITHUB_ENV."
-  fi
-}
 
 main() {
   get_org_id "$GH_ORG" "$GH_PAT"

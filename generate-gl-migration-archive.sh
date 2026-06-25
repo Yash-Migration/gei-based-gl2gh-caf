@@ -32,6 +32,7 @@ if [[ ! -s "$INVENTORY_FILE" ]]; then
     exit 1
 else
     echo "[INFO] Using Inventory file: $INVENTORY_FILE"
+    echo ""
 fi
 
 # Check if docker command can be executed
@@ -52,6 +53,31 @@ fi
 
 # --- Helpers ---# String for filenames: - replace / or \ and spaces with underscores
 file_safe() { echo "$1" | tr '/ ' '_' ; }
+
+validate_export_models() {
+    local value="$1"
+    local row="$2"
+    local column="$3"
+
+    local model
+
+    IFS='|' read -r -a models <<< "$value"
+
+    for model in "${models[@]}"; do
+
+        if [[ "|${GL_EXPORTER_ALLOWED_MODELS}|" != *"|${model}|"* ]]; then
+            echo "[ERROR] Row: ${row} - Invalid value '$model' in ${column}"
+            echo "[ERROR] Allowed values: ${GL_EXPORTER_ALLOWED_MODELS}"
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+convert_pipe_to_comma() {
+    echo "$1" | tr '|' ','
+}
 
 # Check if SSL is disabled
 SSL_OPTS=""
@@ -129,8 +155,11 @@ GH_REPO_IDX="$(find_col "github_repo")" || array_of_err_messages+=("[ERROR] Miss
 Branch_Count="$(find_col "Branch_Count")" || array_of_err_messages+=("[ERROR] Missing required header: Branch_Count")
 Commit_Count="$(find_col "Commit_Count")" || array_of_err_messages+=("[ERROR] Missing required header: Commit_Count")
 FULL_URL_IDX="$(find_col "Full_URL")" || array_of_err_messages+=("[ERROR] Missing required header: Full_URL")
-EXCEPT_COMMIT_COMMENTS="$(find_col "except_commit_comments")"
 GH_REPO_VISIBILITY="$(find_col "gh_repo_visibility")" || array_of_err_messages+=("[ERROR] Missing required header: gh_repo_visibility")
+
+# Flags
+INCLUDE_IN_EXPORT_IDX="$(find_col "include_in_export" || true)"
+EXCLUDE_FROM_EXPORT_IDX="$(find_col "exclude_from_export" || true)"
 
 if ((${#array_of_err_messages[@]})); then
     {
@@ -150,8 +179,18 @@ while IFS= read -r raw; do
     pr="$(echo "${flds[$PR_IDX]:-}")"   # Extract Project value (blank if missing).
     github_org="$(echo "${flds[$GH_ORG_IDX]:-}")"   # Extract Github Org name (blank if missing).
     github_repo="$(echo "${flds[$GH_REPO_IDX]:-}")"   # Extract Github repo name (blank if missing).
-    except_commit_comments="$(echo "${flds[$EXCEPT_COMMIT_COMMENTS]:-}")"
     gh_repo_visibility="${flds[$GH_REPO_VISIBILITY]:-}"
+
+    include_in_export=""
+    exclude_from_export=""
+
+    if [[ -n "${INCLUDE_IN_EXPORT_IDX:-}" ]]; then
+        include_in_export="${flds[$INCLUDE_IN_EXPORT_IDX]:-}"
+    fi
+
+    if [[ -n "${EXCLUDE_FROM_EXPORT_IDX:-}" ]]; then
+        exclude_from_export="${flds[$EXCLUDE_FROM_EXPORT_IDX]:-}"
+    fi
 
     total=$((total + 1))   # Increment total rows processed.
 
@@ -163,13 +202,34 @@ while IFS= read -r raw; do
        exit 1
     fi
 
-    echo "Checking except flag arguments (Commit Comments)"
-    if [[ -z "${except_commit_comments:-}" ]] ||  [[ "$except_commit_comments" == "no" ]] || [[ "$except_commit_comments" == "n" ]]; then
-        GL_EXPORTER_ARGS=""
-        echo "--except commit_comments : None | exporting the entire repo"
-    elif [[ "$except_commit_comments" == "yes" ]] ||  [[ "$except_commit_comments" == "y" ]]; then
-        GL_EXPORTER_ARGS="--except commit_comments"
-        echo "--except commit_comments : Yes | exporting the repo without commit comments"
+    GL_EXPORTER_ARGS=""
+
+    if [[ -n "$include_in_export" && -n "$exclude_from_export" ]]; then
+        echo "[ERROR] Row: ${total} - include_in_export and exclude_from_export cannot both be populated"
+        fail=$((fail + 1))
+        failed+=("$ns/$pr")
+        continue
+    fi
+
+    if [[ -n "$include_in_export" ]]; then
+        if ! validate_export_models "$include_in_export" "$total" "include_in_export"; then
+            fail=$((fail + 1))
+            failed+=("$ns/$pr")
+            continue
+        fi
+        GL_EXPORTER_ARGS="--only $(convert_pipe_to_comma "$include_in_export")"
+        echo "[INFO] Export filter applied for project '$ns/$pr': including only [$include_in_export]"
+    elif [[ -n "$exclude_from_export" ]]; then
+        if ! validate_export_models "$exclude_from_export" "$total" "exclude_from_export"; then
+            fail=$((fail + 1))
+            failed+=("$ns/$pr")
+            continue
+        fi
+        GL_EXPORTER_ARGS="--except $(convert_pipe_to_comma "$exclude_from_export")"
+        echo "[INFO] Export filter applied for project '$ns/$pr': excluding [$exclude_from_export]"
+    else
+        echo ". "
+        echo "[INFO] No include/exclude filters specified for project '$ns/$pr': Exporting entire repository."
     fi
 
     # Extract Project name slug
@@ -208,13 +268,21 @@ while IFS= read -r raw; do
     #  - Input CSV: /workspace/export_tmp.csv
     #  - Output archive: /workspace/<out_tar>
 
+    # $GL_EXPORTER_ARGS:
+    # Per-project exporter arguments derived from the inventory CSV.
+    # Example: include_in_export / exclude_from_export values are converted to --only or --except for the specific project being processed.
+
+    # ${GL_EXPORTER_EXTRA_ARGS:-}:
+    # Global exporter arguments defined in config.sh and applied to every project.
+    # Example: setting '--debug' or '--lock-projects=transient' will apply that option to all project exports in the current run.
+
     if $DOCKER_CMD run --rm \
     -e GITLAB_API_ENDPOINT="$GITLAB_API_ENDPOINT" \
     -e GITLAB_USERNAME="$GITLAB_USERNAME" \
     -e GITLAB_API_PRIVATE_TOKEN="$GITLAB_API_PRIVATE_TOKEN" \
     -v "$WORKDIR":/workspace \
     "$GL_EXPORTER_IMAGE" \
-    gl_exporter $GL_EXPORTER_ARGS $SSL_OPTS -f "/workspace/$(basename "$tmp_csv")" -o "/workspace/$out_tar" >>"$LOG_FILE" 2>&1
+    gl_exporter $GL_EXPORTER_ARGS ${GL_EXPORTER_EXTRA_ARGS:-} $SSL_OPTS -f "/workspace/$(basename "$tmp_csv")" -o "/workspace/$out_tar" >>"$LOG_FILE" 2>&1
     then
         echo "\"$ns\",\"$pr\",\"$WORKDIR/$out_tar\",\"$github_org\",\"$github_repo\",\"$gh_repo_visibility\"" >> "$SUCCESS_LIST_FILE"  # Append a success record to the output CSV (quoted values).
         ok=$((ok + 1))  # Increment success count.
@@ -225,6 +293,7 @@ while IFS= read -r raw; do
         fail=$((fail + 1))      # Increment failure count.
     fi
     rm -f "$tmp_csv"  # Clean up the temporary per-row CSV.
+    echo ""
 
 done < <(tail -n +2 "$INVENTORY_FILE")
 
@@ -248,4 +317,3 @@ echo
 echo "Run the below command to set env variable before running next script"
 echo "export ARCHIVE_LIST=$SUCCESS_LIST_FILE"
 echo
- 

@@ -1,4 +1,7 @@
-
+############################################################
+# CONFIG GITHUB URL
+############################################################
+DISABLE_SSL=Y
 
 ############################################################
 # COMMON VARIABLES (used by all scripts)
@@ -19,10 +22,11 @@ AZURE_UPLOAD_SCRIPT="$MIGRATION_SCRIPTS/upload-to-azure-blob.sh"
 AWS_UPLOAD_SCRIPT="$MIGRATION_SCRIPTS/upload-to-aws-blob.sh"
 GITHUB_ENV="$ARTIFACTS_DIR/github_env.txt"
 
-############################################################
-# CONFIG GL EXPORTER ARGS 
-############################################################
-DISABLE_SSL=Y
+# Valid values allowed for include_in_export / exclude_from_export
+GL_EXPORTER_ALLOWED_MODELS="issues|merge_requests|commit_comments|hooks|wiki"
+
+# Additional gl-exporter arguments applied to all exports
+GL_EXPORTER_EXTRA_ARGS=""
 
 # --- Runner script to invoke JS scripts
 RUNNER_SCRIPT="$BASE_SCRIPT_LOC/runner.sh"
@@ -33,6 +37,8 @@ RUNNER_SCRIPT="$BASE_SCRIPT_LOC/runner.sh"
 CREATE_ARCHIVE_LOG="$LOG_DIR/create-migration-archive"
 UPLOAD_ARCHIVE_LOG="$LOG_DIR/upload-archive"
 START_MIGRATION_LOG="$LOG_DIR/start-gl2gh-migration"
+POST_MIGRATION_VALIDATION_LOG="$LOG_DIR/post-migration-validation"
+MONITOR_MIGRATION_LOG="$LOG_DIR/monitor-migration"
 
 ############################################################
 # END OF CONFIGURATION

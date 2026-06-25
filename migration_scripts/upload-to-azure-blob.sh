@@ -144,15 +144,14 @@ upload_archive_to_azure_blob() {
   PRESIGNED_URL="https://${storage_account_for_url}.blob.core.windows.net/${AZ_CONTAINER}/${blob_name}?${sas_token}"
   export PRESIGNED_URL
 
+  if [[ -z "$PRESIGNED_URL" || "$PRESIGNED_URL" == "null" ]]; then
+        echo "Error: Failed to get valid upload URL"
+        exit 1
+    fi
+
   echo "PRESIGNED_URL=${PRESIGNED_URL}"
   echo "Archive Upload URL: ${PRESIGNED_URL}"
-
-  # If running inside GitHub Actions, persist for next steps
-  if [[ -n "${GITHUB_ENV:-}" ]]; then
-    echo "PRESIGNED_URL=${PRESIGNED_URL}" >> "$GITHUB_ENV"
-    echo "Wrote PRESIGNED_URL to GITHUB_ENV."
-  fi
-}
+  echo "PRESIGNED_URL=$PRESIGNED_URL" >>"$GITHUB_ENV"
 
 main() {
   get_org_id "$GH_ORG" "$GH_PAT"

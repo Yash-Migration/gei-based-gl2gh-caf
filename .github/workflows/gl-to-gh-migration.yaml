@@ -11,19 +11,22 @@ on:
         description: "GitLab Stats file generated using gitlab-stats gh extension"
         type: string
         default: "gitlab-stats.csv"
+        required: true
       GITHUB_TYPE:
         description: "Allowed values are GitHub or GitHubDR"
         type: string
         default: "GitHub"
+        required: true
       RUNNER_LABEL:
         description: "Runner label"
         type: string
         default: "ubuntu-latest"
+        required: true
 
 permissions:
   contents: read
   actions: read
-
+  
 # ------------------ Global Variables ------------------
 env:
   DEBIAN_FRONTEND: "noninteractive"
@@ -818,7 +821,7 @@ jobs:
           echo "--------------------------------------"
           cat start-gl2gh-repo-migration.out
           printf '\n'
-
+          
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -877,7 +880,7 @@ jobs:
           name: start-repository-migration-artifacts
           path: .
 
-      - name: display-final-summary
+      - name: display-migration-summary
         shell: bash
         run: |
           SUMMARY_FILE="final-migration-summary.txt"
@@ -916,7 +919,7 @@ jobs:
           start_fail=$(get_last_num_for_key "$START_OUT" "Failed")
 
           printf '\n'
-          echo "FINAL SUMMARY"
+          echo "MIGRATION SUMMARY"
           echo "-------------"
           printf "Readiness check            : See gl-migration-readiness-check.out\n"
           printf "Generate migration archives : total=%s, success=%s, failed=%s\n" "$gen_total" "$gen_succ" "$gen_fail"
@@ -982,7 +985,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: display-final-summary-artifacts
+          name: display-migration-summary-artifacts
           retention-days: 7
           path: |
             gl-migration-readiness-check.out
@@ -993,11 +996,12 @@ jobs:
             output_files/
             logs/
 
+
   # ------------------ Approve before Monitoring ------------------
   approve-before-monitoring:
     name: approve-before-monitoring
     runs-on: ["${{ inputs.RUNNER_LABEL }}"]
-    needs: [start-repository-migration,display-migration-summary]
+    needs: [start-repository-migration]
     environment:
       name: approvers-group   # ✅ MUST configure in GitHub UI
     steps:
@@ -1019,7 +1023,7 @@ jobs:
           echo " - output_files/migration-outputs_*.csv"
           echo
           echo "Click 'Review deployments' → Approve to continue."
-
+          
   # ------------------ 6) Monitor Repository Migrations ------------------
   monitor-repository-migrations:
     name: monitor-repository-migrations
@@ -1039,8 +1043,8 @@ jobs:
       AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-    needs: [approve-before-monitoring]
-  
+    needs: [start-repository-migration,approve-before-monitoring]
+    
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -1074,28 +1078,79 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-  
-          # ✅ Derive API URL once
-          if [[ "$GH_HOST" == "github.com" ]]; then
-            export TARGET_API_URL="https://api.github.com"
-          else
-            export TARGET_API_URL="https://api.$GH_HOST"
-          fi
-  
-          echo "[INFO] TARGET_API_URL: $TARGET_API_URL"
-  
+
           # ✅ Identify correct CSV
-          export CSV_FILE=$(ls output_files/migration-outputs_*.csv | head -n1)
+          export MIGRATION_OUTPUT_FILE=$(ls output_files/migration-outputs_*.csv | head -n1)
   
-          echo "[INFO] CSV_FILE: $CSV_FILE"
+          echo "[INFO] MIGRATION_OUTPUT_FILE: $MIGRATION_OUTPUT_FILE"
   
-          chmod +x ./polling_monitoring.sh
-          ./polling_monitoring.sh
-  
+          chmod +x ./gl2gh-monitor-migration-status.sh
+          ./gl2gh-monitor-migration-status.sh
+
+      - name: Publish Monitor Summary to Dashboard
+        if: always()
+        shell: bash
+        run: |
+          if [ -f output_files/migration-status-*.csv ]; then
+            echo "### Migration Monitoring Summary" >> $GITHUB_STEP_SUMMARY
+            echo "Artifact summaries successfully generated." >> $GITHUB_STEP_SUMMARY
+          fi
+          
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: monitor-repository-migrations-artifacts
           retention-days: 7
           path: |
-            migration-status.csv
+            gl2gh-monitor-migration-status.out
+            output_files/
+            logs/
+            
+# ------------------ 7) Post-Migration-Validation ------------------
+  Post-Migration-Validation:
+    name: Post-Migration-Validation
+    runs-on: ["${{ inputs.RUNNER_LABEL }}"]
+    environment: ${{ inputs.ENVIRONMENT_NAME }}
+    env:
+      GH_HOST: ${{ vars.GH_HOST }}
+      INVENTORY_FILE: ${{ inputs.INVENTORY_FILE }}
+      GH_TOKEN: ${{ secrets.GH_PAT }}
+      SOURCE_GL_SERVER_URL: ${{ vars.SOURCE_GL_SERVER_URL }}
+      GITLAB_USERNAME: ${{ vars.GITLAB_USERNAME }}
+      STORAGE_TYPE: ${{ vars.STORAGE_TYPE }}
+      AZ_CONTAINER: ${{ vars.AZ_CONTAINER }}
+      AWS_BUCKET_NAME: ${{ vars.AWS_BUCKET_NAME }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      GITLAB_API_PRIVATE_TOKEN: ${{ secrets.GITLAB_API_PRIVATE_TOKEN }}
+      GH_PAT: ${{ secrets.GH_PAT }}
+      AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    needs: [monitor-repository-migrations]
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Post Validation Script
+        shell: bash
+        run: |
+          set -euo pipefail
+          export INVENTORY_FILE="${INVENTORY_FILE:-}"
+          export GH_HOST="${GH_HOST:-}"
+          export GH_TOKEN="${GH_PAT:-}"
+          export SOURCE_GL_SERVER_URL="${SOURCE_GL_SERVER_URL:-}"
+          export GITLAB_API_PRIVATE_TOKEN="${GITLAB_API_PRIVATE_TOKEN:-}"
+          chmod +x ./gl-post-migration-validation.sh
+          ./gl-post-migration-validation.sh
+          
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Post-Migration-Validation-artifacts
+          retention-days: 7
+          path: |
+            output_files/post-migration-validation/
+            logs/post-migration-validation-*
+  
