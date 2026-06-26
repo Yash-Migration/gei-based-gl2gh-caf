@@ -260,10 +260,25 @@ while IFS= read -r raw; do
 
   # Match checks
   branch_count_match=$([[ "$github_branch_count" -eq "$gitlab_branch_count" ]] && echo "✅" || echo "❌")
-  commit_count_match=$([[ "$github_commit_count_default_branch" -eq "$gitlab_commit_count" ]] && echo "✅" || echo "❌")
+  commit_count_match="⚠️"
+  if [[ "$gitlab_commit_count" =~ ^[0-9]+$ && "$github_commit_count_default_branch" =~ ^[0-9]+$ ]]; then
+    if [[ "$github_commit_count_default_branch" -eq "$gitlab_commit_count" ]]; then
+      commit_count_match="✅"
+    else
+      commit_count_match="❌"
+      notes="${notes:+$notes; }GitLab Commit_Count may be total repo commits, while GitHub count is default-branch only"
+    fi
+  else
+    commit_count_match="⚠️"
+    notes="${notes:+$notes; }Commit count unavailable or non-numeric"
+  fi
 
   # Processing counters
-  ok=$((ok + 1))
+  if [[ "$github_repo_exists" == true && "$branch_count_match" == "✅" && "$commit_count_match" == "✅" ]]; then
+    ok=$((ok + 1))
+  else
+    fail=$((fail + 1))
+  fi
 
   # Logs
   echo "[$(date)]   Exists: ${exists_status} | Branches: ${github_branch_count} ${branches_status}"
