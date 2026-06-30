@@ -5,7 +5,7 @@
 
 Organizations that want to use a single migration repository for multiple teams can optionally implement the automated environment provisioning workflow described in `Setup-Customer-Environment.md`.
 
-**[Setup-Customer-Environment.md](./Setup-Customer-Environment.md)**
+Check this url for more detailed explaination **[Setup-Customer-Environment.md](./Setup-Customer-Environment.md)**
 
 ### How It Works
 
@@ -15,13 +15,15 @@ Organizations that want to use a single migration repository for multiple teams 
 - Teams do not require repository administrator access.
 
 - Each team creates its own customer branch, for example:
-
   ```text
   team-a
   team-b
   customer-1
   customer-2
-
+  ```
+- Environment, Protection rule, Variables and Secrets placeholders are added automatically.
+- Teams has to fill them with valid informations.
+  
 ## 1. Executive Summary – Objective
 This document provides detailed procedures to migrate source code repositories from **GitLab Server** to **GitHub**.
 
