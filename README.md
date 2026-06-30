@@ -1,5 +1,27 @@
 # GitLab → GitHub Migration
 
+## Optional: Centralized Multi-Team Environment Setup (One-Time Setup)
+> Skip this section and proceed directly to **Section 1. Executive Summary – Objective** if the migration repository will be used by a single team and environments will be created and managed manually.
+
+Organizations that want to use a single migration repository for multiple teams can optionally implement the automated environment provisioning workflow described in `Setup-Customer-Environment.md`.
+
+**[Setup-Customer-Environment.md](./Setup-Customer-Environment.md)**
+
+### How It Works
+
+- A repository administrator configures a single repository-level secret:
+  - `GH_PAT` (with permissions to create environments, variables, secrets, and branch policies).
+
+- Teams do not require repository administrator access.
+
+- Each team creates its own customer branch, for example:
+
+  ```text
+  team-a
+  team-b
+  customer-1
+  customer-2
+
 ## 1. Executive Summary – Objective
 This document provides detailed procedures to migrate source code repositories from **GitLab Server** to **GitHub**.
 
