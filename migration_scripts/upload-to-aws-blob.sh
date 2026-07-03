@@ -59,21 +59,23 @@ upload_archive_to_aws_s3() {
   local org_id="$1"
   local repo_name="$2"
 
-  local archive_file="${repo_name}.tar.gz"
-
-  # Look for the archive in root directory (same pattern as your scripts)
-  cd /
-  echo "Looking for archive file at: $PWD/$archive_file"
-
+  local archive_file="${TARGET_ARCHIVE_PATH:-${repo_name}.tar.gz}"
+  archive_file="$(realpath "$archive_file" 2>/dev/null || echo "$archive_file")"
+  
+  echo "Looking for archive file at: $archive_file"
+  
   if [[ ! -f "$archive_file" ]]; then
-    echo "Error: Archive file not found at $PWD/$archive_file"
-    ls -la
+    echo "Error: Archive file not found at $archive_file"
     exit 1
   fi
-
+  
+  local archive_name
+  archive_name="$(basename "$archive_file")"
+  
   local bucket="${AWS_BUCKET_NAME}"
   local region="${AWS_REGION}"
-  local s3_key="${org_id}/${archive_file}"
+  local s3_key="${org_id}/${archive_name}"
+
   local expires="$((SAS_EXPIRY_HOURS * 3600))"
 
   echo "Uploading to AWS S3..."
@@ -152,7 +154,7 @@ PY
   echo "Archive Upload URL: ${PRESIGNED_URL}"
   echo "PRESIGNED_URL=$PRESIGNED_URL" >>"$GITHUB_ENV"
 
-
+}
 main() {
   get_org_id "$GH_ORG" "$GH_PAT"
   upload_archive_to_aws_s3 "$ORG_ID" "$TARGET_GH_REPO"

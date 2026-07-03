@@ -217,7 +217,22 @@ jobs:
           echo "Node Version   : $(node --version)"
           echo "npm Version    : $(npm --version)"
           echo "GH CLI Version : $(gh --version | head -n1)"
+          if [[ "$STORAGE_TYPE" == "AZURE" ]]; then
+              command -v az >/dev/null 2>&1 || {
+                  echo "[ERROR] Azure CLI (az) is required for STORAGE_TYPE=AZURE"
+                  exit 1
+              }
+              echo "[INFO] Azure CLI detected: $(az version | jq -r '."azure-cli"')"
+          fi
 
+          if [[ "$STORAGE_TYPE" == "AWS" ]]; then
+              command -v aws >/dev/null 2>&1 || {
+                  echo "[ERROR] AWS CLI (aws) is required for STORAGE_TYPE=AWS"
+                  exit 1
+              }
+          
+              echo "[INFO] AWS CLI detected: $(aws --version)"
+          fi
           printf '\n'
           echo "[INFO] Listing npm packages..."
           npm list @octokit/rest @octokit/graphql || true
@@ -323,9 +338,9 @@ jobs:
 
           # Validate GITHUB_TYPE input
           if [[ "$GITHUB_TYPE" == "GitHub" ]]; then
-            echo "[INFO] GITHUB_TYPE=$GITHUB_TYPE"
+            echo "[INFO] GITHUB_TYPE:$GITHUB_TYPE"
           elif [[ "$GITHUB_TYPE" == "GitHubDR" ]]; then
-            echo "[INFO] GITHUB_TYPE=$GITHUB_TYPE"
+            echo "[INFO] GITHUB_TYPE:$GITHUB_TYPE"
           else
             echo "[ERROR] Invalid GITHUB_TYPE: $GITHUB_TYPE"
             echo "Allowed values: GitHub or GitHubDR"
@@ -385,6 +400,8 @@ jobs:
           test -f ./generate-gl-migration-archive.sh || { echo "[ERROR] generate-gl-migration-archive.sh not found"; exit 1; }
           test -f ./upload-gl-migration-archive.sh || { echo "[ERROR] upload-gl-migration-archive.sh not found"; exit 1; }
           test -f ./start-gl2gh-repo-migration.sh || { echo "[ERROR] start-gl2gh-repo-migration.sh not found"; exit 1; }
+          test -f ./gl2gh-monitor-migration-status.sh || { echo "[ERROR] gl2gh-monitor-migration-status.sh not found"; exit 1; }
+          test -f ./gl-post-migration-validation.sh || { echo "[ERROR] gl-post-migration-validation.sh not found"; exit 1; }
           
           # Migration scripts folder required by config.sh + start script
           test -d ./migration_scripts || { echo "[ERROR] migration_scripts/ folder not found"; exit 1; }
@@ -392,6 +409,7 @@ jobs:
           test -f ./migration_scripts/create-env-vars.js || { echo "[ERROR] migration_scripts/create-env-vars.js not found"; exit 1; }
           test -f ./migration_scripts/create-migration-source.js || { echo "[ERROR] migration_scripts/create-migration-source.js not found"; exit 1; }
           test -f ./migration_scripts/start-repo-migration.js || { echo "[ERROR] migration_scripts/start-repo-migration.js not found"; exit 1; }
+          test -f ./migration_scripts/gh-api.js || { echo "[ERROR] migration_scripts/gh-api.js not found"; exit 1; }
 
           echo "[INFO] Scripts are present"
 
@@ -681,7 +699,7 @@ jobs:
           export GH_HOST="${GH_HOST:-}"
           export STORAGE_TYPE="${STORAGE_TYPE:-}"
 
-          # If storage type is selected as Azue or AWS, set required env
+          # If storage type is selected as Azure or AWS, set required env
           export AZ_CONTAINER="${AZ_CONTAINER:-}"
           export AZURE_STORAGE_CONNECTION_STRING="${AZURE_STORAGE_CONNECTION_STRING:-}"
           export AWS_BUCKET_NAME="${AWS_BUCKET_NAME:-}"
@@ -757,6 +775,8 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
     needs: [upload-migration-archives]
+    outputs:
+     MIGRATION_OUTPUT_FILE_BASENAME: ${{ steps.capture.outputs.MIGRATION_OUTPUT_FILE_BASENAME }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -795,7 +815,7 @@ jobs:
           export GH_HOST="${GH_HOST:-}"
           export STORAGE_TYPE="${STORAGE_TYPE:-}"
 
-          # If storage type is selected as Azue or AWS, set required env
+          # If storage type is selected as Azure or AWS, set required env
           export AZ_CONTAINER="${AZ_CONTAINER:-}"
           export AZURE_STORAGE_CONNECTION_STRING="${AZURE_STORAGE_CONNECTION_STRING:-}"
           export AWS_BUCKET_NAME="${AWS_BUCKET_NAME:-}"
@@ -822,6 +842,23 @@ jobs:
           cat start-gl2gh-repo-migration.out
           printf '\n'
           
+          MIGRATION_EXPORT="$(grep -E '^export[[:space:]]+MIGRATION_OUTPUT_FILE=' start-gl2gh-repo-migration.out || true)"
+          [[ -n "$MIGRATION_EXPORT" ]] || { echo "[ERROR] MIGRATION_OUTPUT_FILE export line not found"; exit 1; }
+
+          MIGRATION_OUTPUT_FILE="${MIGRATION_EXPORT#export MIGRATION_OUTPUT_FILE=}"
+          [[ -n "${MIGRATION_OUTPUT_FILE:-}" ]] || { echo "[ERROR] MIGRATION_OUTPUT_FILE empty"; exit 1; }
+
+          echo "MIGRATION_OUTPUT_FILE=$MIGRATION_OUTPUT_FILE" > start-repository-migration-output-var.env
+
+      - name: capture
+        id: capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          MIGRATION_OUTPUT_FILE="$(grep -E '^MIGRATION_OUTPUT_FILE=' start-repository-migration-output-var.env | head -n1 | cut -d= -f2-)"
+          MIGRATION_OUTPUT_FILE_BASENAME="$(basename "$MIGRATION_OUTPUT_FILE")"
+          echo "MIGRATION_OUTPUT_FILE_BASENAME=$MIGRATION_OUTPUT_FILE_BASENAME" >> "$GITHUB_OUTPUT"
+          
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -829,6 +866,7 @@ jobs:
           retention-days: 7
           path: |
             start-gl2gh-repo-migration.out
+            start-repository-migration-output-var.env
             output_files/
             logs/
 
@@ -1001,7 +1039,7 @@ jobs:
   approve-before-monitoring:
     name: approve-before-monitoring
     runs-on: ["${{ inputs.RUNNER_LABEL }}"]
-    needs: [start-repository-migration]
+    needs: [display-migration-summary]
     environment:
       name: approvers-group   # ✅ MUST configure in GitHub UI
     steps:
@@ -1024,7 +1062,7 @@ jobs:
           echo
           echo "Click 'Review deployments' → Approve to continue."
           
-  # ------------------ 6) Monitor Repository Migrations ------------------
+  # ------------------ 7) Monitor Repository Migrations ------------------
   monitor-repository-migrations:
     name: monitor-repository-migrations
     runs-on: ["${{ inputs.RUNNER_LABEL }}"]
@@ -1055,20 +1093,14 @@ jobs:
           name: start-repository-migration-artifacts
           path: .
   
-      # ✅ Auth
-      - name: Authenticate GitHub CLI
+      # ✅ Install extension (CRITICAL)
+      - name: Install gh-ado2gh extension
         shell: bash
         run: |
           set -euo pipefail
           unset GH_TOKEN
           echo "$GH_PAT" | gh auth login --with-token --hostname "$GH_HOST"
           gh auth status
-  
-      # ✅ Install extension (CRITICAL)
-      - name: Install gh-ado2gh extension
-        shell: bash
-        run: |
-          set -euo pipefail
           gh extension install https://github.com/github/gh-ado2gh || \
           gh extension upgrade gh-ado2gh
           gh extension list
@@ -1076,11 +1108,19 @@ jobs:
       # ✅ Run your script
       - name: Run Monitoring Script
         shell: bash
+        env:
+          MIGRATION_OUTPUT_FILE: ${{ needs.start-repository-migration.outputs.MIGRATION_OUTPUT_FILE_BASENAME }}
         run: |
           set -euo pipefail
 
           # ✅ Identify correct CSV
-          export MIGRATION_OUTPUT_FILE=$(ls output_files/migration-outputs_*.csv | head -n1)
+          MIGRATION_OUTPUT_FILE="$(basename "$MIGRATION_OUTPUT_FILE")"
+          export MIGRATION_OUTPUT_FILE="$CI_PROJECT_DIR/output_files/$MIGRATION_OUTPUT_FILE"
+
+          test -f "$MIGRATION_OUTPUT_FILE" || {
+            echo "[ERROR] Migration output file not found: $MIGRATION_OUTPUT_FILE"
+            exit 1
+          }
   
           echo "[INFO] MIGRATION_OUTPUT_FILE: $MIGRATION_OUTPUT_FILE"
   
@@ -1106,9 +1146,9 @@ jobs:
             output_files/
             logs/
             
-# ------------------ 7) Post-Migration-Validation ------------------
-  Post-Migration-Validation:
-    name: Post-Migration-Validation
+# ------------------ 8) Post-Migration-Validation ------------------
+  post-migration-validation:
+    name: post-migration-validation
     runs-on: ["${{ inputs.RUNNER_LABEL }}"]
     environment: ${{ inputs.ENVIRONMENT_NAME }}
     env:
@@ -1130,7 +1170,7 @@ jobs:
     
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Run Post Validation Script
         shell: bash
@@ -1148,9 +1188,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: Post-Migration-Validation-artifacts
+          name: post-migration-validation-artifacts
           retention-days: 7
           path: |
             output_files/post-migration-validation/
             logs/post-migration-validation-*
-  

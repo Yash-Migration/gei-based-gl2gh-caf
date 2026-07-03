@@ -446,6 +446,7 @@ echo "Detailed Results"
 echo "----------------"
 column -s, -t "$OUTPUT_FILE"
 
+echo
 echo "Migration status written to: $OUTPUT_FILE"
 echo "Detailed logs written to: $LOG_FILE"
 echo "Repository migration logs written to: $PER_MIGRATION_LOG_DIR directory"

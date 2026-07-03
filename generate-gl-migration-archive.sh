@@ -49,6 +49,8 @@ fi
 if ! $DOCKER_CMD image inspect "$GL_EXPORTER_IMAGE" >/dev/null 2>&1; then
     echo "[ERROR] $GL_EXPORTER_IMAGE not found"
     exit 1
+else
+    echo "[INFO] gl-exporter version: $(docker run --rm "$GL_EXPORTER_IMAGE" gl_exporter --version)"
 fi
 
 # --- Helpers ---# String for filenames: - replace / or \ and spaces with underscores
@@ -175,11 +177,12 @@ while IFS= read -r raw; do
     #IFS=',' read -r -a flds <<< "$line"    # Split the line into fields by comma.
     readarray -t flds < <(parse_csv_line "$line")
 
-    ns="$(echo "${flds[$NS_IDX]:-}")"   # Extract Namespace value (blank if missing).
-    pr="$(echo "${flds[$PR_IDX]:-}")"   # Extract Project value (blank if missing).
-    github_org="$(echo "${flds[$GH_ORG_IDX]:-}")"   # Extract Github Org name (blank if missing).
-    github_repo="$(echo "${flds[$GH_REPO_IDX]:-}")"   # Extract Github repo name (blank if missing).
-    gh_repo_visibility="${flds[$GH_REPO_VISIBILITY]:-}"
+    ns="$(echo "${flds[$NS_IDX]:-}" | xargs)"
+    pr="$(echo "${flds[$PR_IDX]:-}" | xargs)"
+    github_org="$(echo "${flds[$GH_ORG_IDX]:-}" | xargs)"
+    github_repo="$(echo "${flds[$GH_REPO_IDX]:-}" | xargs)"
+    gh_repo_visibility="$(echo "${flds[$GH_REPO_VISIBILITY]:-}" | xargs)"
+    full_url="$(echo "${flds[$FULL_URL_IDX]:-}" | xargs)"
 
     include_in_export=""
     exclude_from_export=""
@@ -194,12 +197,15 @@ while IFS= read -r raw; do
 
     total=$((total + 1))   # Increment total rows processed.
 
-    [[ -z "$ns" || -z "$pr" || -z "$github_org" || -z "$github_repo"  || -z "$gh_repo_visibility" ]] && skipped=$((skipped+1)) && echo "[WARN] Row: ${total} - Skipping due to missing required fields: gitlab_group='${ns}' gitlab_project='${pr}' github_org='${github_org}' github_repo='${github_repo}' gh_repo_visibility='$gh_repo_visibility'" && continue   # Skip rows that don’t have both Namespace, Project, GitHub Org and GitHub Repo.
+    [[ -z "$ns" || -z "$pr" || -z "$github_org" || -z "$github_repo"  || -z "$gh_repo_visibility" || -z "$full_url" ]] && skipped=$((skipped+1)) && echo "" && echo "[WARN] Row: ${total} - Skipping due to missing required fields: gitlab_group='${ns}' gitlab_project='${pr}' Full_URL='${full_url}' github_org='${github_org}' github_repo='${github_repo}' gh_repo_visibility='$gh_repo_visibility'" && continue   # Skip rows that don’t have both Namespace, Project, GitHub Org and GitHub Repo.
 
     if [[ "$gh_repo_visibility" != "private" && "$gh_repo_visibility" != "public" && "$gh_repo_visibility" != "internal" ]]; then
-       echo "[ERROR] Invalid gh_repo_visibility: '$gh_repo_visibility'"
+       echo ""
+       echo "[ERROR] Row: ${total} - Invalid gh_repo_visibility '$gh_repo_visibility' for project '$ns/$pr'"
        echo "[ERROR] Valid values: private, public, internal"
-       exit 1
+       fail=$((fail + 1))
+       failed+=("$ns/$pr")
+       continue
     fi
 
     GL_EXPORTER_ARGS=""
@@ -232,24 +238,20 @@ while IFS= read -r raw; do
         echo "[INFO] No include/exclude filters specified for project '$ns/$pr': Exporting entire repository."
     fi
 
-    # Extract Project name slug
-    full_url="$(echo "${flds[$FULL_URL_IDX]:-}")"
-
-    if [[ -z "$full_url" ]]; then
-        echo "[ERROR] Row: ${total} - Full_URL is empty. Cannot resolve project slug for '$ns / $pr'"
-        fail=$((fail + 1))
-        failed+=("$ns/$pr")
-        continue
-    fi
-
     # Resolve correct GitLab project slug from Full_URL
-    resolved_pr="$(basename "${full_url%%\?*}")"   # remove query params
-    resolved_pr="${resolved_pr%.git}"              # remove .git if present
+    clean_url="${full_url%%\?*}"
+    clean_url="${clean_url%.git}"
 
-    if [[ "$pr" == *" "* && -n "$resolved_pr" ]]; then
-        echo "[INFO] Resolved project name: '$pr' -> '$resolved_pr'"
-        pr="$resolved_pr"
-    fi
+    path_part="$(echo "$clean_url" | sed -E 's#https?://[^/]+/##')"
+
+    resolved_ns="$(dirname "$path_part")"
+    resolved_pr="$(basename "$path_part")"
+
+    echo "[INFO] Resolved namespace: '$ns' -> '$resolved_ns'"
+    echo "[INFO] Resolved project : '$pr' -> '$resolved_pr'"
+
+    ns="$resolved_ns"
+    pr="$resolved_pr"
 
     # Name of the output archive for this project.
     safe_ns="$(file_safe "$ns")"
