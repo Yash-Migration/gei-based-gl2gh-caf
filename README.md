@@ -30,7 +30,7 @@ This document provides detailed procedures to migrate source code repositories f
 ## 2. Requirements
 
 ### 2.1 GitHub Runner Host Requirements
-- **OS:** Ubuntu
+- **OS:** Ubuntu-latest
 - Required tooling validated by the pipeline:
   - `curl`
   - `jq`
