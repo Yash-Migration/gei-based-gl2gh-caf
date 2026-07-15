@@ -30,7 +30,7 @@ This document provides detailed procedures to migrate source code repositories f
 ## 2. Requirements
 
 ### 2.1 GitHub Runner Host Requirements
-- **OS:** Ubuntu-latest
+- **OS:** Ubuntu
 - Required tooling validated by the pipeline:
   - `curl`
   - `jq`
@@ -94,6 +94,7 @@ https://docs.github.com/en/enterprise-cloud@latest/migrations/ado/managing-acces
 ├── config.sh
 ├── runner.sh
 ├── gl-migration-readiness-check.sh
+├── gl-gitsizer-readiness-check.sh
 ├── generate-gl-migration-archive.sh
 ├── upload-gl-migration-archive.sh
 ├── start-gl2gh-repo-migration.sh
@@ -128,6 +129,7 @@ https://docs.github.com/en/enterprise-cloud@latest/migrations/ado/managing-acces
 | `config.sh` | Contains shared / generic variables used by multiple scripts. |
 | `runner.sh` | Runner helper / wrapper script used to execute migration operations in the runner environment. |
 | `gl-migration-readiness-check.sh` | Checks active merge requests and running pipelines before migration. |
+| `gl-gitsizer-readiness-check.sh` | Performs GitSizer analysis to identify repositories and large files. |
 | `generate-gl-migration-archive.sh` | Generates GitLab migration archives / exports for repositories defined in the inventory. |
 | `upload-gl-migration-archive.sh` | Uploads generated archives to the configured intermediate storage. |
 | `start-gl2gh-repo-migration.sh` | Starts GitLab to GitHub repository migration jobs in GitHub. |
@@ -253,6 +255,7 @@ Jobs that use this environment:
 - `start-repository-migration`
 - `display-migration-summary`
 - `monitor-repository-migrations`
+- `post-migration-validation`
 
 #### Environment Variables
 
@@ -272,7 +275,7 @@ Jobs that use this environment:
 | Name | Description |
 |------|-------------|
 | GITLAB_API_PRIVATE_TOKEN | GitLab token with required access |
-| GH_PAT | Personal Access Token with required scopes |
+| GH_PAT | GitHub Personal Access Token with required scopes |
 | GLXREPO_GH_PAT | PAT required for the GL Exporter source repo |
 | AZURE_STORAGE_CONNECTION_STRING | Required only if STORAGE_TYPE = Azure |
 | AWS_ACCESS_KEY_ID | Required only if STORAGE_TYPE = AWS |
@@ -316,7 +319,9 @@ Configure required reviewers in `approvers-group` to enforce manual approvals.
 
 3. Pre-migration readiness check
    - Checks active GitLab merge requests and running pipelines
-   - Uploads readiness output and logs as artifacts
+   - Performs a GitSizer assessment to identify repositories and files that may require review before migration
+   - Uploads readiness and GitSizer reports as workflow artifacts
+   - GitSizer findings should be reviewed and approved before proceeding to the migration stages
 
 4. Manual approval after readiness check
    - Uses `approvers-group`
@@ -359,7 +364,12 @@ Configure required reviewers in `approvers-group` to enforce manual approvals.
     - Runs `gl2gh-monitor-migration-status.sh`
     - Uploads `migration-status.csv`
 
-11. Preserve artifacts
+11. Post-migration validation
+    - Reads inventory file and validates successfully migrated repositories in GitHub
+    - Validates branch and commit counts by running `gl-post-migration-validation.sh`
+    - Uploads post-validation reports and logs
+
+12. Preserve artifacts
     - Output files, logs, summaries, and monitoring reports are uploaded as workflow artifacts.
 
 ## 7.1 Pipeline Trigger
