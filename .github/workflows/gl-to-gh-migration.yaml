@@ -217,6 +217,7 @@ jobs:
           echo "Node Version   : $(node --version)"
           echo "npm Version    : $(npm --version)"
           echo "GH CLI Version : $(gh --version | head -n1)"
+          
           if [[ "$STORAGE_TYPE" == "AZURE" ]]; then
               command -v az >/dev/null 2>&1 || {
                   echo "[ERROR] Azure CLI (az) is required for STORAGE_TYPE=AZURE"
@@ -233,6 +234,7 @@ jobs:
           
               echo "[INFO] AWS CLI detected: $(aws --version)"
           fi
+          
           printf '\n'
           echo "[INFO] Listing npm packages..."
           npm list @octokit/rest @octokit/graphql || true
@@ -397,6 +399,7 @@ jobs:
           test -f ./runner.sh || { echo "[ERROR] runner.sh not found"; exit 1; }
           test -f ./config.sh || { echo "[ERROR] config.sh not found"; exit 1; }
           test -f ./gl-migration-readiness-check.sh || { echo "[ERROR] gl-migration-readiness-check.sh not found"; exit 1; }
+          test -f ./gl-gitsizer-readiness-check.sh || { echo "[ERROR] gl-gitsizer-readiness-check.sh not found"; exit 1; }
           test -f ./generate-gl-migration-archive.sh || { echo "[ERROR] generate-gl-migration-archive.sh not found"; exit 1; }
           test -f ./upload-gl-migration-archive.sh || { echo "[ERROR] upload-gl-migration-archive.sh not found"; exit 1; }
           test -f ./start-gl2gh-repo-migration.sh || { echo "[ERROR] start-gl2gh-repo-migration.sh not found"; exit 1; }
@@ -411,6 +414,28 @@ jobs:
           test -f ./migration_scripts/start-repo-migration.js || { echo "[ERROR] migration_scripts/start-repo-migration.js not found"; exit 1; }
           test -f ./migration_scripts/gh-api.js || { echo "[ERROR] migration_scripts/gh-api.js not found"; exit 1; }
 
+          # Verify upload scripts are present
+          if [[ "$STORAGE_TYPE" == "GITHUB" ]]; then
+              test -f ./migration_scripts/upload-to-github-blob.sh || {
+                  echo "[ERROR] migration_scripts/upload-to-github-blob.sh not found"
+                  exit 1
+              }
+          fi
+          
+          if [[ "$STORAGE_TYPE" == "AZURE" ]]; then
+              test -f ./migration_scripts/upload-to-azure-blob.sh || {
+                  echo "[ERROR] migration_scripts/upload-to-azure-blob.sh not found"
+                  exit 1
+              }
+          fi
+          
+          if [[ "$STORAGE_TYPE" == "AWS" ]]; then
+              test -f ./migration_scripts/upload-to-aws-blob.sh || {
+                  echo "[ERROR] migration_scripts/upload-to-aws-blob.sh not found"
+                  exit 1
+              }
+          fi
+          
           echo "[INFO] Scripts are present"
 
           # Validate Inventory file exists and not empty
@@ -507,10 +532,9 @@ jobs:
           chmod +x ./gl-gitsizer-readiness-check.sh
   
           echo
-          echo "======================================="
           echo "# 1. Migration Readiness Check"
           echo "======================================="
-  
+          echo "Running migration readiness checks for open merge requests and active pipelines..."
           ./gl-migration-readiness-check.sh \
             > gl-migration-readiness-check.out 2>&1 || {
               echo "[ERROR] Migration readiness check failed"
@@ -519,10 +543,9 @@ jobs:
             }
   
           echo
-          echo "======================================="
           echo "# 2. GitSizer Repository Discovery"
           echo "======================================="
-  
+          echo "Running GitSizer readiness checks for repository size and large file analysis..."
           ./gl-gitsizer-readiness-check.sh \
             > gl-gitsizer-readiness-check.out 2>&1 || {
               echo "[ERROR] GitSizer readiness check failed"
@@ -850,6 +873,20 @@ jobs:
           export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-}"
 
           chmod +x ./upload-gl-migration-archive.sh ./config.sh
+          
+          # Verify upload scripts are present
+          if [[ "$STORAGE_TYPE" == "GITHUB" ]]; then
+              chmod +x migration_scripts/upload-to-github-blob.sh
+          fi
+          
+          if [[ "$STORAGE_TYPE" == "AZURE" ]]; then
+              chmod +x migration_scripts/upload-to-azure-blob.sh
+          fi
+          
+          if [[ "$STORAGE_TYPE" == "AWS" ]]; then
+              chmod +x migration_scripts/upload-to-aws-blob.sh
+          fi
+          
           [[ -x "./upload-gl-migration-archive.sh" ]] || { echo "[ERROR] upload-gl-migration-archive.sh not executable"; exit 1; }
 
           ARCHIVE_LIST="$(basename "$ARCHIVE_LIST")"
@@ -1235,7 +1272,7 @@ jobs:
           name: start-repository-migration-artifacts
           path: .
   
-      # ✅ Install extension (CRITICAL)
+      # ✅ Install GH CLI extension
       - name: Install gh-ado2gh extension
         shell: bash
         run: |
