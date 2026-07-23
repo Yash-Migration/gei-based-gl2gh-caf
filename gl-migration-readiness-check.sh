@@ -176,6 +176,7 @@ IFS=',' read -r -a cols <<< "$header"
 # Find column index
 NS_IDX=""
 PR_IDX=""
+FULL_URL_IDX=""
 
 for i in "${!cols[@]}"; do
   # Trim spaces and strip quotes (simple)
@@ -183,11 +184,13 @@ for i in "${!cols[@]}"; do
   h="${h%\"}"; h="${h#\"}"
   [[ "$h" == "Namespace" ]] && NS_IDX="$i"
   [[ "$h" == "Project"   ]] && PR_IDX="$i"
+  [[ "$h" == "Full_URL" ]] && FULL_URL_IDX="$i"
 done
 
 # If required headers missing, fail early
 [[ -n "$NS_IDX" ]] || { echo "[ERROR] Missing required header: Namespace"; exit 1; }
 [[ -n "$PR_IDX" ]] || { echo "[ERROR] Missing required header: Project"; exit 1; }
+[[ -n "$FULL_URL_IDX" ]] || { echo "[ERROR] Missing required header: Full_URL"; exit 1; }
 
 # ----------------------------
 # Summary arrays
@@ -218,17 +221,33 @@ while IFS= read -r raw; do
   # Read namespace and project and clean them
   ns="$(echo "${flds[$NS_IDX]:-}" | xargs)"
   pr="$(echo "${flds[$PR_IDX]:-}" | xargs)"
+  full_url="$(echo "${flds[$FULL_URL_IDX]:-}" | xargs)"
+
   ns="${ns%\"}"; ns="${ns#\"}"
   pr="${pr%\"}"; pr="${pr#\"}"
 
   total=$((total + 1))
 
   # Skip if missing
-  if [[ -z "$ns" || -z "$pr" ]]; then
-    skipped=$((skipped + 1))
-    echo "[WARN] Row: $total - Skipping due to missing values: GitLab group='$ns' GitLab Project='$pr'"
-    continue
+  if [[ -z "$ns" || -z "$pr" || -z "$full_url" ]]; then
+      skipped=$((skipped + 1))
+      echo "[WARN] Row: $total - Skipping due to missing values: GitLab group='$ns' GitLab Project='$pr' Full_URL='$full_url'"
+      continue
   fi
+
+  clean_url="${full_url%%\?*}"
+  clean_url="${clean_url%.git}"
+  
+  path_part="$(echo "$clean_url" | sed -E 's#https?://[^/]+/##')"
+  
+  resolved_ns="$(dirname "$path_part")"
+  resolved_pr="$(basename "$path_part")"
+  
+  echo "[INFO] Resolved namespace: '$ns' -> '$resolved_ns'"
+  echo "[INFO] Resolved project : '$pr' -> '$resolved_pr'"
+  
+  ns="$resolved_ns"
+  pr="$resolved_pr"
 
   project_path="$ns/$pr"
   enc_project="$(urlencode "$project_path")"
@@ -374,4 +393,3 @@ else
   echo -e "\033[32mNo open merge requests or active pipelines detected. You can proceed with migration.\033[0m"
   exit 0
 fi
-

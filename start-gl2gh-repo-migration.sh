@@ -333,6 +333,10 @@ print_summary() {
   echo " - For migrations that are failed, details are written to: ${MIGRATION_FAILURE_FILE}"
   echo " - Detailed logs written to: ${LOG_FILE}"
   echo " - Env variables that are used for each repo are available in: ${MIGRATION_ENVS_FILE}" >>"$LOG_FILE"
+  echo ""
+  echo " - To run monitor script, set the MIGRATION_OUTPUT_FILE env"
+  echo "export MIGRATION_OUTPUT_FILE=$MIGRATION_OUTPUT_FILE"
+  echo ""
 }
 
 # --- Run ---

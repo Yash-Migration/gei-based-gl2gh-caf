@@ -1,3 +1,2 @@
-Namespace,Project,Commit_Count,Branch_Count,Full_URL,github_org,github_repo,gh_repo_visibility,except_commit_comments
-cmfmigration,solar-system-gitea,2,1,http://gitlabpoc.eastus.cloudapp.azure.com/cmfmigration/solar-system-gitea,Yash-Migration,solar-system-gitea,public,yes
-cmfmigration,calotracker,1,1,http://gitlabpoc.eastus.cloudapp.azure.com/cmfmigration/calotracker,Yash-Migration,calotracker,internal,no
+Namespace,Project,Commit_Count,Branch_Count,Full_URL,github_org,github_repo,gh_repo_visibility,include_in_export,exclude_from_export
+test-migration,test-project,4,1,https://code.siemens.com/test-migration/test-project,OSES-Migration,yash-test-project-2,internal,,
