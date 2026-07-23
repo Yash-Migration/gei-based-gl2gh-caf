@@ -23,6 +23,8 @@ Check this url for more detailed explaination **[Setup-Customer-Environment.md](
   ```
 - Environment, Protection rule, Variables and Secrets placeholders are added automatically.
 - Teams has to fill them with valid informations.
+
+Note: In the `setup-customer-environment.yml` please do modify `GH_HOST` for Data Residency accounts only. `GH_HOST: <hostname.ghe.com>  eg: wizkraft.ghe.com`
   
 ## 1. Executive Summary – Objective
 This document provides detailed procedures to migrate source code repositories from **GitLab Server** to **GitHub**.
