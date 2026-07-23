@@ -6,6 +6,7 @@ on:
 permissions:
   contents: read
   actions: write
+  deployments: write
 
 jobs:
   setup-environment:
@@ -14,10 +15,11 @@ jobs:
       !startsWith(github.event.ref, 'feature/') &&
       !startsWith(github.event.ref, 'bugfix/') &&
       !startsWith(github.event.ref, 'hotfix/')
-    runs-on: ubuntu-24.04
+    runs-on: Siemens-Ubuntu-24.04
 
     env:
       GH_TOKEN: ${{ secrets.GH_PAT }}
+      GH_HOST: siemens.ghe.com
 
     steps:
       - name: Checkout Repository
