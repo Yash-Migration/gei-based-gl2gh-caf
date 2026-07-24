@@ -370,6 +370,7 @@ run_one_migration() {
     --github-org "$github_org" \
     --github-repo "$github_repo" \
     --target-repo-visibility "$visibility" \
+    --use-github-storage \
     "${EXTRA_ARGS[@]}" \
     > "$repo_log" 2>&1
 
