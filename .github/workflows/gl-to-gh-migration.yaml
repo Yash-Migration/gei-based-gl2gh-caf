@@ -358,6 +358,15 @@ jobs:
     runs-on: ["${{ inputs.RUNNER_LABEL }}"]
     environment: ${{ inputs.ENVIRONMENT_NAME }}
     needs: [start-repository-migration]
+    env:
+      SOURCE_GL_SERVER_URL: ${{ vars.SOURCE_GL_SERVER_URL }}
+      GITLAB_USERNAME: ${{ vars.GITLAB_USERNAME }}
+      GH_HOST: ${{ vars.GH_HOST }}
+      TARGET_API_URL: ${{ vars.TARGET_API_URL }}
+      TARGET_UPLOADS_URL: ${{ vars.TARGET_UPLOADS_URL }}
+      GITLAB_API_PRIVATE_TOKEN: ${{ secrets.GITLAB_API_PRIVATE_TOKEN }}
+      GH_PAT: ${{ secrets.GH_PAT }}
+      GH_TOKEN: ${{ secrets.GH_PAT }}
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
