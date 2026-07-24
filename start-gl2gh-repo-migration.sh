@@ -1,344 +1,559 @@
 #!/usr/bin/env bash
+
 set -euo pipefail
 
-# --- Config: set script base path and load env from config.sh ---
-SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/config.sh"
-GH_HOST="$GH_HOST"
+# ============================================================
+# GitLab to GitHub Migration using gh gl2gh migrate-repo
+# ============================================================
+#
+# This script is intended to replace the old:
+#   generate archive -> upload archive -> start migration
+#
+# with a direct:
+#   gh gl2gh migrate-repo
+#
+# Mandatory environment variables:
+#   SOURCE_GL_SERVER_URL
+#   TARGET_API_URL
+#   TARGET_UPLOADS_URL
+#   GITLAB_API_PRIVATE_TOKEN
+#   GH_PAT
+#   INVENTORY_FILE
+#
+# Expected inventory columns:
+#   Namespace / namespace / gitlab_group / gitlab_namespace / group
+#   Project / project / gitlab_project / project_name / name
+#   github_org / gh_org / target_org / organization / org
+#   github_repo / gh_repo / target_repo / repository / repo
+#   gh_repo_visibility / visibility / target_repo_visibility
+#
+# Optional inventory columns:
+#   include_in_export    -> maps to --gitlab-only
+#   exclude_from_export  -> maps to --gitlab-except
+#
+# Output:
+#   output_files/migration-outputs_<timestamp>.csv
+#   output_files/migration-failures_<timestamp>.csv
+#   logs/
+#   logs/gl2gh-verbose-logs/
+#
+# Prints:
+#   export MIGRATION_OUTPUT_FILE=<path>
+#
+# ============================================================
 
-if [[ -z "$GH_HOST" ]]; then
-    echo "GH_HOST is not set"
-    echo "Set GH_HOST; export GH_HOST=\"github.com\" for Non-DR (or) GH_HOST=\"SUBDOMAIN.ghe.com\" for DR"
-    exit 1
-fi
+timestamp="$(date -u +%Y%m%d_%H%M%S)"
 
-if [[ "$GITHUB_TYPE" == "GitHub" ]]; then
-    GH_SERVER_URL="https://github.com"
-    GH_API_URL="https://api.github.com"
+ROOT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
+OUTPUT_DIR="$ROOT_DIR/output_files"
+LOG_DIR="$ROOT_DIR/logs"
+VERBOSE_DIR="$LOG_DIR/gl2gh-verbose-logs"
 
-elif [[ "$GITHUB_TYPE" == "GitHubDR" ]]; then
-    GH_SERVER_URL="https://${GH_HOST}"
-    GH_API_URL="https://api.${GH_HOST}"
-else
-    echo "[ERROR] Invalid GITHUB_TYPE: $GITHUB_TYPE"
-    echo "[ERROR] Valid values: GitHub | GitHubDR"
-    exit 1
-fi
+mkdir -p "$OUTPUT_DIR" "$LOG_DIR" "$VERBOSE_DIR"
 
-export GH_SERVER_URL GH_API_URL
+RUN_LOG="$LOG_DIR/gl2gh-migrate-repos-$timestamp.log"
+MIGRATION_OUTPUT_FILE="$OUTPUT_DIR/migration-outputs_$timestamp.csv"
+FAILURE_FILE="$OUTPUT_DIR/migration-failures_$timestamp.csv"
 
-RUN_TS="$(date +'%Y%m%d_%H%M%S')"
-LOG_FILE="${START_MIGRATION_LOG}_${RUN_TS}.log"
-mkdir -p "${LOG_DIR}"
+touch "$RUN_LOG"
 
-# Save all stdout+stderr to logfile AND still show on terminal
-exec > >(tee -a "$LOG_FILE") 2>&1
+log() {
+  echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] $*" | tee -a "$RUN_LOG"
+}
 
-mkdir -p "${ARTIFACTS_DIR}" "${MIGRATION_SCRIPTS}"
-
-# --- Basic checks ---
-if [[ ! -s "$UPLOADED_ARCHIVES" ]]; then
-  echo "[ERROR] CSV file with pre-signed URL is missing/empty: $UPLOADED_ARCHIVES"
+fail() {
+  log "[ERROR] $*"
   exit 1
-else
-  echo "[INFO] Using CSV file: $UPLOADED_ARCHIVES"
-fi
-
-if [[ ! -x "$RUNNER_SCRIPT" ]]; then
-  echo "[ERROR] Runner script not found/executable: $RUNNER_SCRIPT"
-  exit 1
-else
-  echo "[INFO] Using runner script: $RUNNER_SCRIPT"
-fi
-
-# --- Outputs ---
-MIGRATION_OUTPUT_FILE="${ARTIFACTS_DIR}/migration-outputs_${RUN_TS}.csv"
-MIGRATION_FAILURE_FILE="${ARTIFACTS_DIR}/migration-failures_${RUN_TS}.csv"
-MIGRATION_ENVS_FILE="${ARTIFACTS_DIR}/migration-envs_${RUN_TS}.txt"
-
-echo "gitlab_group,gitlab_project,github_org,github_repository,gh_repo_visibility,migration_source_id,migration_id" > "${MIGRATION_OUTPUT_FILE}"
-echo "gitlab_group,gitlab_project,github_org,github_repository_archive,gh_repo_visibility,migration_source_id,migration_id" > "${MIGRATION_FAILURE_FILE}"
-
-# --- Helpers
-# Remove leading/trailing double-quotes and trailing CR from a field.
-dequote() {
-  local field="${1:-}"
-  field="${field%$'\r'}"
-  field="${field%\"}"
-  field="${field#\"}"
-  echo "$field"
 }
 
-# Parse CSV file
-parse_csv_line() {
-    local line="$1"
-    local -a fields=()
-    local field=""
-    local in_quotes=false
-    local char
-    local i
-
-    for ((i=0; i<${#line}; i++)); do
-        char="${line:$i:1}"
-
-        if [[ "$char" == '"' ]]; then
-            if [[ "$in_quotes" == true ]]; then
-                if [[ "${line:$((i+1)):1}" == '"' ]]; then
-                    field+="$char"
-                    ((i++))
-                else
-                    in_quotes=false
-                fi
-            else
-                in_quotes=true
-            fi
-            elif [[ "$char" == ',' && "$in_quotes" == false ]]; then
-            fields+=("$field")
-            field=""
-        else
-            field+="$char"
-        fi
-    done
-
-    fields+=("$field")
-    printf '%s\n' "${fields[@]}"
+trim() {
+  local value="${1:-}"
+  value="${value//$'\r'/}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
 }
 
-# Append env details for a row
-append_env_details() {
-  local ns="$1"; local pr="$2"; local out="$3"
-  {
-    echo "# Gitlab Group: ${ns}; Gitlab Project: ${pr} - Used env"
-    echo "export SOURCE_GL_SERVER_URL=${SOURCE_GL_SERVER_URL:-}"
-    echo "export SOURCE_GL_NAMESPACE=${SOURCE_GL_NAMESPACE:-}"
-    echo "export SOURCE_GL_PROJECT=${SOURCE_GL_PROJECT:-}"
-    echo "export GH_ORG=${GH_ORG:-}"
-    echo "export GH_REPO_NAME=${GH_REPO_NAME:-}"
-    echo "export GH_REPO_VISIBILITY=${GH_REPO_VISIBILITY:-}"
-    echo "export PRESIGNED_URL=${PRESIGNED_URL:-}"
-    echo "export TARGET_GH_ORG=${TARGET_GH_ORG:-}"
-    echo "export TARGET_GH_ORG_ID=${TARGET_GH_ORG_ID:-}"
-    echo "export ARCHIVE_FILE_NAME=${ARCHIVE_FILE_NAME:-}"
-    echo "export MIGRATION=${MIGRATION:-}"
-    echo "export MIGRATION_SOURCE_ID=${MIGRATION_SOURCE_ID:-}"
-    echo "export MIGRATION_ID=${MIGRATION_ID:-}"
-    echo ""
-  } >> "$out"
+normalize_url() {
+  local url
+  url="$(trim "${1:-}")"
+
+  if [[ -z "$url" ]]; then
+    printf ''
+    return 0
+  fi
+
+  if [[ "$url" != http://* && "$url" != https://* ]]; then
+    url="https://$url"
+  fi
+
+  url="${url%/}"
+  printf '%s' "$url"
 }
 
-# Find the column index by header name (exact match), using dequote for safety.
-find_col() {
+csv_escape() {
+  local value="${1:-}"
+  value="${value//\"/\"\"}"
+  printf '"%s"' "$value"
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
+}
+
+require_env() {
   local name="$1"
-  for i in "${!cols[@]}"; do
-    [[ "$(dequote "${cols[$i]}")" == "$name" ]] && { echo "$i"; return 0; }
-  done
-  return 1
+  local value="${!name:-}"
+  [[ -n "$value" ]] || fail "$name is required"
 }
 
-# --- Globals for summary ---
-declare -a MIG_IDS=()
-TOT=0; SKIP=0; OK=0; FAIL=0
+csv_value() {
+  local line="$1"
+  local idx="$2"
 
-# --- Read header and compute indices ---
-header="$(head -n 1 "$UPLOADED_ARCHIVES" | tr -d '\r')"
-#IFS=',' read -r -a cols <<< "$header"
-readarray -t cols < <(parse_csv_line "$header")
+  if [[ "$idx" -lt 0 ]]; then
+    printf ''
+    return 0
+  fi
 
-# --- Validate headers ---
+  python3 - "$line" "$idx" <<'PY'
+import csv
+import sys
 
-array_of_err_messages=()
+line = sys.argv[1]
+idx = int(sys.argv[2])
 
-GL_GRP_IDX="$(find_col 'gitlab_group')" || array_of_err_messages+=("[ERROR] Missing required header: gitlab_group")
-GL_PRJ_IDX="$(find_col 'gitlab_project')" || array_of_err_messages+=("[ERROR] Missing required header: gitlab_project")
-ARC_FILE_IDX="$(find_col 'archive_file_path')" || array_of_err_messages+=("[ERROR] Missing required header: archive_file_path")
-TGT_REPO_IDX="$(find_col 'archive_file_name')" || array_of_err_messages+=("[ERROR] Missing required header: archive_file_name")
-URL_IDX="$(find_col 'presigned_url')" || array_of_err_messages+=("[ERROR] Missing required header: presigned_url")
-ORG_IDX="$(find_col 'github_org')" || array_of_err_messages+=("[ERROR] Missing required header: github_org")
-REPO_IDX="$(find_col 'github_repo')" || array_of_err_messages+=("[ERROR] Missing required header: github_repo")
-GH_REPO_VISIBILITY_IDX="$(find_col 'gh_repo_visibility')" || array_of_err_messages+=("[ERROR] Missing required header: gh_repo_visibility")
+try:
+    row = next(csv.reader([line]))
+    print(row[idx] if idx < len(row) else "")
+except Exception:
+    print("")
+PY
+}
 
+find_col_index() {
+  local header="$1"
+  shift
 
-if ((${#array_of_err_messages[@]})); then
+  python3 - "$header" "$@" <<'PY'
+import csv
+import sys
+
+header = sys.argv[1]
+wanted = [x.strip().lower() for x in sys.argv[2:]]
+
+try:
+    cols = next(csv.reader([header]))
+except Exception:
+    print(-1)
+    sys.exit(0)
+
+normalized = []
+
+for col in cols:
+    c = col.strip().strip('"').strip("'").lower()
+    c = c.replace(" ", "_").replace("-", "_")
+    normalized.append(c)
+
+wanted_norm = [
+    w.replace(" ", "_").replace("-", "_")
+    for w in wanted
+]
+
+for i, col in enumerate(normalized):
+    if col in wanted_norm:
+        print(i)
+        sys.exit(0)
+
+print(-1)
+PY
+}
+
+validate_visibility() {
+  local visibility="$1"
+  visibility="$(trim "$visibility")"
+  visibility="$(echo "$visibility" | tr '[:upper:]' '[:lower:]')"
+
+  case "$visibility" in
+    internal|private|public)
+      printf '%s' "$visibility"
+      ;;
+    "")
+      printf 'internal'
+      ;;
+    *)
+      log "[WARN] Invalid gh_repo_visibility '$visibility'. Defaulting to internal."
+      printf 'internal'
+      ;;
+  esac
+}
+
+convert_pipe_list_to_comma() {
+  local value="$1"
+  value="$(trim "$value")"
+  value="${value//|/,}"
+  printf '%s' "$value"
+}
+
+capture_verbose_logs() {
+  local safe_name="$1"
+
+  local copied="false"
+
+  while IFS= read -r file; do
+    [[ -f "$file" ]] || continue
+
+    local base
+    base="$(basename "$file")"
+
+    cp "$file" "$VERBOSE_DIR/${safe_name}_${base}_${timestamp}" 2>/dev/null || true
+    copied="true"
+  done < <(
+    find \
+      "${RUNNER_TEMP:-/tmp}" \
+      "$ROOT_DIR" \
+      "$HOME" \
+      -maxdepth 7 \
+      -type f \
+      \( -iname "verbose.log" -o -iname "*verbose*.log" -o -iname "gl2gh*.log" \) \
+      2>/dev/null || true
+  )
+
+  if [[ "$copied" == "true" ]]; then
+    log "[INFO] Verbose logs captured under $VERBOSE_DIR"
+  else
+    log "[WARN] No verbose.log found for this repository"
+  fi
+}
+
+extract_migration_id() {
+  local file="$1"
+  local migration_id=""
+
+  migration_id="$(
+    grep -Eio 'Migration[[:space:]]+ID[:[:space:]]*[A-Za-z0-9_-]+' "$file" 2>/dev/null \
+      | tail -n1 \
+      | sed -E 's/Migration[[:space:]]+ID[:[:space:]]*//I' \
+      || true
+  )"
+
+  if [[ -z "$migration_id" ]]; then
+    migration_id="$(
+      grep -Eio 'Migration[[:space:]]+in[[:space:]]+progress[[:space:]]+\(ID:[[:space:]]*[A-Za-z0-9_-]+\)' "$file" 2>/dev/null \
+        | tail -n1 \
+        | sed -E 's/.*\(ID:[[:space:]]*([A-Za-z0-9_-]+)\).*/\1/I' \
+        || true
+    )"
+  fi
+
+  if [[ -z "$migration_id" ]]; then
+    migration_id="$(
+      grep -Eio 'migrationId[=:[:space:]]*[A-Za-z0-9_-]+' "$file" 2>/dev/null \
+        | tail -n1 \
+        | sed -E 's/migrationId[=:[:space:]]*//I' \
+        || true
+    )"
+  fi
+
+  printf '%s' "$migration_id"
+}
+
+build_common_args() {
+  COMMON_ARGS=()
+
+  SOURCE_GL_SERVER_URL="$(normalize_url "$SOURCE_GL_SERVER_URL")"
+  TARGET_API_URL="$(normalize_url "$TARGET_API_URL")"
+  TARGET_UPLOADS_URL="$(normalize_url "$TARGET_UPLOADS_URL")"
+
+  [[ -n "$SOURCE_GL_SERVER_URL" ]] || fail "SOURCE_GL_SERVER_URL is empty after normalization"
+  [[ -n "$TARGET_API_URL" ]] || fail "TARGET_API_URL is empty after normalization"
+  [[ -n "$TARGET_UPLOADS_URL" ]] || fail "TARGET_UPLOADS_URL is empty after normalization"
+
+  COMMON_ARGS+=(--gitlab-server-url "$SOURCE_GL_SERVER_URL")
+  COMMON_ARGS+=(--use-github-storage)
+  COMMON_ARGS+=(--github-pat "$GH_PAT")
+  COMMON_ARGS+=(--gitlab-pat "$GITLAB_API_PRIVATE_TOKEN")
+  COMMON_ARGS+=(--target-api-url "$TARGET_API_URL")
+  COMMON_ARGS+=(--target-uploads-url "$TARGET_UPLOADS_URL")
+
+  if [[ -n "${GL_EXPORTER_DOCKER_IMAGE:-}" ]]; then
+    COMMON_ARGS+=(--docker-image "$GL_EXPORTER_DOCKER_IMAGE")
+  fi
+
+  if [[ "${GITLAB_DEBUG:-false}" == "true" ]]; then
+    COMMON_ARGS+=(--gitlab-debug)
+  fi
+
+  if [[ "${GL2GH_QUEUE_ONLY:-true}" == "true" ]]; then
+    COMMON_ARGS+=(--queue-only)
+  fi
+
+  COMMON_ARGS+=(--verbose)
+}
+
+run_one_migration() {
+  local row_num="$1"
+  local gitlab_group="$2"
+  local gitlab_project="$3"
+  local github_org="$4"
+  local github_repo="$5"
+  local visibility="$6"
+  local include_in_export="$7"
+  local exclude_from_export="$8"
+
+  local safe_name
+  safe_name="$(echo "${github_org}_${github_repo}" | tr '/: ' '___' | tr -cd 'A-Za-z0-9._-')"
+
+  local repo_log="$LOG_DIR/gl2gh-${safe_name}-$timestamp.out"
+  local status="FAILED"
+  local migration_id=""
+  local exit_code=0
+  local error_message=""
+
+  log "------------------------------------------------------------"
+  log "[INFO] Row             : $row_num"
+  log "[INFO] GitLab group    : $gitlab_group"
+  log "[INFO] GitLab project  : $gitlab_project"
+  log "[INFO] GitHub org      : $github_org"
+  log "[INFO] GitHub repo     : $github_repo"
+  log "[INFO] Repo visibility : $visibility"
+  log "[INFO] Repo log        : $repo_log"
+  log "------------------------------------------------------------"
+
+  EXTRA_ARGS=()
+
+  if [[ -n "$include_in_export" && -n "$exclude_from_export" ]]; then
+    error_message="Both include_in_export and exclude_from_export are populated. Only one is allowed."
+    log "[ERROR] $error_message"
+
+    {
+      csv_escape "$row_num"; echo -n ","
+      csv_escape "$gitlab_group"; echo -n ","
+      csv_escape "$gitlab_project"; echo -n ","
+      csv_escape "$github_org"; echo -n ","
+      csv_escape "$github_repo"; echo -n ","
+      csv_escape "$visibility"; echo -n ","
+      csv_escape "FAILED"; echo -n ","
+      csv_escape ""; echo -n ","
+      csv_escape "1"; echo -n ","
+      csv_escape "$repo_log"; echo -n ","
+      csv_escape "$error_message"; echo
+    } >> "$MIGRATION_OUTPUT_FILE"
+
+    {
+      csv_escape "$row_num"; echo -n ","
+      csv_escape "$gitlab_group"; echo -n ","
+      csv_escape "$gitlab_project"; echo -n ","
+      csv_escape "$github_org"; echo -n ","
+      csv_escape "$github_repo"; echo -n ","
+      csv_escape "1"; echo -n ","
+      csv_escape "$error_message"; echo
+    } >> "$FAILURE_FILE"
+
+    return 1
+  fi
+
+  if [[ -n "$include_in_export" ]]; then
+    EXTRA_ARGS+=(--gitlab-only "$(convert_pipe_list_to_comma "$include_in_export")")
+  fi
+
+  if [[ -n "$exclude_from_export" ]]; then
+    EXTRA_ARGS+=(--gitlab-except "$(convert_pipe_list_to_comma "$exclude_from_export")")
+  fi
+
+  set +e
+
+  gh gl2gh migrate-repo \
+    "${COMMON_ARGS[@]}" \
+    --gitlab-group "$gitlab_group" \
+    --gitlab-project "$gitlab_project" \
+    --github-org "$github_org" \
+    --github-repo "$github_repo" \
+    --target-repo-visibility "$visibility" \
+    "${EXTRA_ARGS[@]}" \
+    > "$repo_log" 2>&1
+
+  exit_code=$?
+
+  set -e
+
+  cat "$repo_log" >> "$RUN_LOG" || true
+
+  migration_id="$(extract_migration_id "$repo_log")"
+  capture_verbose_logs "$safe_name"
+
+  if [[ "$exit_code" -eq 0 ]]; then
+    status="STARTED"
+    log "[SUCCESS] Migration command completed for $github_org/$github_repo"
+  else
+    status="FAILED"
+    error_message="$(tail -n 30 "$repo_log" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g')"
+    log "[ERROR] Migration command failed for $github_org/$github_repo"
+    log "[ERROR] Repo log: $repo_log"
+
+    {
+      csv_escape "$row_num"; echo -n ","
+      csv_escape "$gitlab_group"; echo -n ","
+      csv_escape "$gitlab_project"; echo -n ","
+      csv_escape "$github_org"; echo -n ","
+      csv_escape "$github_repo"; echo -n ","
+      csv_escape "$exit_code"; echo -n ","
+      csv_escape "$error_message"; echo
+    } >> "$FAILURE_FILE"
+  fi
+
   {
-    printf '%s\n' "${array_of_err_messages[@]}"
-    echo "[ERROR] Header must contain 'gitlab_group', 'gitlab_project', 'archive_file_path', 'archive_file_name', 'presigned_url', 'github_org', 'github_repo', 'gh_repo_visibility' "
-  } >&2
-  exit 1
-fi
+    csv_escape "$row_num"; echo -n ","
+    csv_escape "$gitlab_group"; echo -n ","
+    csv_escape "$gitlab_project"; echo -n ","
+    csv_escape "$github_org"; echo -n ","
+    csv_escape "$github_repo"; echo -n ","
+    csv_escape "$visibility"; echo -n ","
+    csv_escape "$status"; echo -n ","
+    csv_escape "$migration_id"; echo -n ","
+    csv_escape "$exit_code"; echo -n ","
+    csv_escape "$repo_log"; echo -n ","
+    csv_escape "$error_message"; echo
+  } >> "$MIGRATION_OUTPUT_FILE"
 
-# --- JS runner wrapper ---
-process_rows() {
-  # Runs one JS step via RUNNER_SCRIPT, parses 'export NAME=VALUE' lines, exports them, returns rc
-  run_step() {
-    local js_relative_path="$1"
-    local runner_script_out
-    local runner_script_status=0
-
-    # Execute JS via runner and capture stdout+stderr
-    runner_script_out="$("$RUNNER_SCRIPT" "$js_relative_path" 2>&1)"
-    runner_script_status=$?
-    echo "$js_relative_path script output is:
-    $runner_script_out" >>"$LOG_FILE"
-
-    # Parse only lines that look like: export NAME=VALUE
-    while IFS= read -r line; do
-      if [[ "$line" =~ ^[[:space:]]*export[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
-        local name="${BASH_REMATCH[1]}"
-        local value="${BASH_REMATCH[2]}"
-        # Trim spaces; strip single/double quotes if present
-        value="$(echo "$value" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
-        [[ "$value" =~ ^\"(.*)\"$ ]] && value="${BASH_REMATCH[1]}"
-        [[ "$value" =~ ^\'(.*)\'$ ]] && value="${BASH_REMATCH[1]}"
-        printf -v "$name" '%s' "$value"
-        export "$name"
-      fi
-    done <<< "$runner_script_out"
-
-    return "$runner_script_status"
-  }
-
-  # --- Robust per-row parsing ---
-  while IFS= read -r raw; do
-    line="$(echo "$raw" | tr -d '\r')"
-    [[ -z "$line" ]] && continue
-
-    #IFS=',' read -r -a flds <<< "$line"
-    readarray -t flds < <(parse_csv_line "$line")
-
-    gitlab_group="$(dequote "${flds[$GL_GRP_IDX]:-}")"
-    project="$(dequote "${flds[$GL_PRJ_IDX]:-}")"
-    archive_file_path="$(dequote "${flds[$ARC_FILE_IDX]:-}")"
-    archive_file_name="$(dequote "${flds[$TGT_REPO_IDX]:-}")"
-    presigned_url="$(dequote "${flds[$URL_IDX]:-}")"
-    github_org="$(dequote "${flds[$ORG_IDX]:-}")"
-    github_repo_name="$(dequote "${flds[$REPO_IDX]:-}")"
-    gh_repo_visibility="$(dequote "${flds[$GH_REPO_VISIBILITY_IDX]:-}")"
-
-    TOT=$((TOT+1))
-
-    # minimal guard
-    if [[ -z "$gitlab_group" || -z "$project" || -z "$presigned_url" || \
-          -z "$archive_file_name" || -z "$github_org" || -z "$github_repo_name" || -z "$gh_repo_visibility" ]]; then
-      SKIP=$((SKIP+1))
-      echo "[WARN] Row ${TOT} - Skipping due to missing headers: gitlab_group='${gitlab_group}' gitlab_project='${project}' presigned_url='${presigned_url}' archive_file_name='${archive_file_name}' github_org='${github_org}' github_repo='${github_repo_name}' gh_repo_visibility='${gh_repo_visibility}' "
-      continue
-    fi
-
-    # reset per-row env
-    unset PRESIGNED_URL SOURCE_GL_NAMESPACE SOURCE_GL_PROJECT MIGRATION TARGET_GH_ORG_ID ARCHIVE_FILE_NAME GH_ORG GH_REPO_NAME MIGRATION_SOURCE_ID MIGRATION_ID GH_REPO_VISIBILITY
-
-    # export row inputs
-    export PRESIGNED_URL="${presigned_url}"
-    export SOURCE_GL_NAMESPACE="${gitlab_group}"
-    export SOURCE_GL_PROJECT="${project}"
-    export ARCHIVE_FILE_NAME="${archive_file_name}"
-    export GH_ORG="${github_org}"
-    export GH_REPO_NAME="${github_repo_name}"
-    export GH_REPO_VISIBILITY="${gh_repo_visibility}"
-    export MIGRATION="$(printf '{"type":"gitlab","sourceRepoUrl":"%s","ghRepoName":"%s"}' "${SOURCE_GL_SERVER_URL%/}/${gitlab_group}/${project}.git" "${github_repo_name}")"
-
-    echo "[INFO] Executing migration scripts for GitLab Group: ${gitlab_group} ; GitLab Project: ${project}"
-
-    # --- Step 1: create-env-vars.js ---
-    pushd "$MIGRATION_SCRIPTS" >/dev/null
-    if ! run_step "$MIGRATION_SCRIPTS/create-env-vars.js"; then
-      echo "[ERROR] Fail: create-env-vars.js ${gitlab_group}/${project}"
-      echo "${gitlab_group},${project},${GH_ORG},${ARCHIVE_FILE_NAME},${GH_REPO_VISIBILITY},${MIGRATION_SOURCE_ID:-},${MIGRATION_ID:-}" >> "${MIGRATION_FAILURE_FILE}"
-      append_env_details "$gitlab_group" "$project" "${MIGRATION_ENVS_FILE}"
-      FAIL=$((FAIL+1))
-      popd >/dev/null
-      continue
-    fi
-    popd >/dev/null
-
-    export TARGET_GH_ORG_ID="$TARGET_GH_ORG_ID"
-    export TARGET_GH_ORG="$GH_ORG"
-    if [[ -n "${TARGET_GH_ORG_ID:-}" ]]; then
-      echo "[INFO] TARGET_GH_ORG_ID set: $TARGET_GH_ORG_ID" >>"$LOG_FILE"
-    else
-      echo "[ERROR] Fail: TARGET_GH_ORG_ID empty ${gitlab_group}/${project}"
-      FAIL=$((FAIL+1))
-      continue
-    fi
-
-    # --- Step 2: create-migration-source.js ---
-    pushd "$MIGRATION_SCRIPTS" >/dev/null
-    if ! run_step "$MIGRATION_SCRIPTS/create-migration-source.js"; then
-      echo "[ERROR] Fail: create-migration-source.js ${gitlab_group}/${project}"
-      echo "${gitlab_group},${project},${GH_ORG},${ARCHIVE_FILE_NAME},${GH_REPO_VISIBILITY},${MIGRATION_SOURCE_ID:-},${MIGRATION_ID:-}" >> "${MIGRATION_FAILURE_FILE}"
-      append_env_details "$gitlab_group" "$project" "${MIGRATION_ENVS_FILE}"
-      FAIL=$((FAIL+1))
-      popd >/dev/null
-      continue
-    fi
-    popd >/dev/null
-
-    export MIGRATION_SOURCE_ID="$MIGRATION_SOURCE_ID"
-    if [[ -n "${MIGRATION_SOURCE_ID:-}" ]]; then
-      echo "[INFO] MIGRATION_SOURCE_ID set: $MIGRATION_SOURCE_ID" >>"$LOG_FILE"
-    else
-      echo "[ERROR] Fail: MIGRATION_SOURCE_ID empty ${gitlab_group}/${project}"
-      FAIL=$((FAIL+1))
-      continue
-    fi
-
-    # --- Step 3: start-repo-migration.js ---
-    pushd "$MIGRATION_SCRIPTS" >/dev/null
-    if ! run_step "$MIGRATION_SCRIPTS/start-repo-migration.js"; then
-      echo "[ERROR] Fail: start-repo-migration.js ${gitlab_group}/${project}"
-      echo "${gitlab_group},${project},${GH_ORG},${ARCHIVE_FILE_NAME},${GH_REPO_VISIBILITY},${MIGRATION_SOURCE_ID:-},${MIGRATION_ID:-}" >> "${MIGRATION_FAILURE_FILE}"
-      append_env_details "$gitlab_group" "$project" "${MIGRATION_ENVS_FILE}"
-      FAIL=$((FAIL+1))
-      popd >/dev/null
-      continue
-    fi
-    popd >/dev/null
-
-    export MIGRATION_ID="$MIGRATION_ID"
-    if [[ -n "${MIGRATION_ID:-}" ]]; then
-      echo "[INFO] MIGRATION_ID set: $MIGRATION_ID" >>"$LOG_FILE"
-    else
-      echo "[ERROR] Fail: MIGRATION_ID empty ${gitlab_group}/${project}"
-      FAIL=$((FAIL+1))
-      continue
-    fi
-
-    MIG_IDS+=("${MIGRATION_ID}")
-    echo "${gitlab_group},${project},${GH_ORG},${GH_REPO_NAME},${GH_REPO_VISIBILITY},${MIGRATION_SOURCE_ID},${MIGRATION_ID}" >> "${MIGRATION_OUTPUT_FILE}"
-    append_env_details "$gitlab_group" "$project" "${MIGRATION_ENVS_FILE}"
-    OK=$((OK+1))
-
-  done < <(tail -n +2 "$UPLOADED_ARCHIVES") # skip header
+  [[ "$exit_code" -eq 0 ]]
 }
 
-print_summary() {
-  echo ""
-  echo "---------------- Migration Summary ----------------"
-  echo "Total processed           :   ${TOT}"
-  echo "Skipped                   :   ${SKIP}"
-  echo "Total Migrations started  :   ${OK}"
-  if [[ ${OK} -gt 0 ]]; then
-    echo "Migration IDs:"
-    for id in "${MIG_IDS[@]}"; do
-      echo " - ${id}"
-    done
-  fi
-  if [[ ${FAIL} -gt 0 ]]; then
-    echo "Failed                    :   ${FAIL}"
-    echo "See failures in: ${MIGRATION_FAILURE_FILE}"
-  fi
-  echo ""
-  echo "Output files:"
-  echo " - For migrations that started successfully, details are written to: ${MIGRATION_OUTPUT_FILE}"
-  echo " - For migrations that are failed, details are written to: ${MIGRATION_FAILURE_FILE}"
-  echo " - Detailed logs written to: ${LOG_FILE}"
-  echo " - Env variables that are used for each repo are available in: ${MIGRATION_ENVS_FILE}" >>"$LOG_FILE"
-  echo ""
-  echo " - To run monitor script, set the MIGRATION_OUTPUT_FILE env"
+main() {
+  log "============================================================"
+  log "GitLab to GitHub migration using gh gl2gh migrate-repo"
+  log "============================================================"
+
+  require_cmd gh
+  require_cmd python3
+  require_cmd grep
+  require_cmd sed
+  require_cmd awk
+  require_cmd find
+
+  require_env SOURCE_GL_SERVER_URL
+  require_env TARGET_API_URL
+  require_env TARGET_UPLOADS_URL
+  require_env GITLAB_API_PRIVATE_TOKEN
+  require_env GH_PAT
+  require_env INVENTORY_FILE
+
+  [[ -f "$INVENTORY_FILE" ]] || fail "Inventory file not found: $INVENTORY_FILE"
+  [[ -s "$INVENTORY_FILE" ]] || fail "Inventory file is empty: $INVENTORY_FILE"
+
+  export GH_PAT="$GH_PAT"
+  export GH_TOKEN="$GH_PAT"
+  export GL_PAT="$GITLAB_API_PRIVATE_TOKEN"
+  export GEI_SKIP_VERSION_CHECK="${GEI_SKIP_VERSION_CHECK:-true}"
+  export GEI_SKIP_STATUS_CHECK="${GEI_SKIP_STATUS_CHECK:-true}"
+
+  build_common_args
+
+  log "[INFO] SOURCE_GL_SERVER_URL  : $SOURCE_GL_SERVER_URL"
+  log "[INFO] TARGET_API_URL        : $TARGET_API_URL"
+  log "[INFO] TARGET_UPLOADS_URL    : $TARGET_UPLOADS_URL"
+  log "[INFO] INVENTORY_FILE        : $INVENTORY_FILE"
+  log "[INFO] MIGRATION_OUTPUT_FILE : $MIGRATION_OUTPUT_FILE"
+  log "[INFO] FAILURE_FILE          : $FAILURE_FILE"
+
+  echo '"row","gitlab_group","gitlab_project","github_org","github_repo","gh_repo_visibility","status","migration_id","exit_code","log_file","error_message"' > "$MIGRATION_OUTPUT_FILE"
+  echo '"row","gitlab_group","gitlab_project","github_org","github_repo","exit_code","error_message"' > "$FAILURE_FILE"
+
+  header="$(head -n 1 "$INVENTORY_FILE")"
+
+  idx_gitlab_group="$(find_col_index "$header" "Namespace" "namespace" "gitlab_group" "gitlab namespace" "gitlab_namespace" "group")"
+  idx_gitlab_project="$(find_col_index "$header" "Project" "project" "gitlab_project" "project_name" "name")"
+  idx_github_org="$(find_col_index "$header" "github_org" "github org" "gh_org" "target_org" "organization" "org")"
+  idx_github_repo="$(find_col_index "$header" "github_repo" "github repo" "gh_repo" "target_repo" "repository" "repo")"
+  idx_visibility="$(find_col_index "$header" "gh_repo_visibility" "repo_visibility" "github_repo_visibility" "visibility" "target_repo_visibility")"
+  idx_include="$(find_col_index "$header" "include_in_export" "gitlab_only" "include")"
+  idx_exclude="$(find_col_index "$header" "exclude_from_export" "gitlab_except" "exclude")"
+
+  [[ "$idx_gitlab_group" -ge 0 ]] || fail "Inventory column missing: Namespace/gitlab_group"
+  [[ "$idx_gitlab_project" -ge 0 ]] || fail "Inventory column missing: Project/gitlab_project"
+  [[ "$idx_github_org" -ge 0 ]] || fail "Inventory column missing: github_org"
+  [[ "$idx_github_repo" -ge 0 ]] || fail "Inventory column missing: github_repo"
+
+  total=0
+  started=0
+  failed=0
+  skipped=0
+  row_num=1
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    row_num=$((row_num + 1))
+
+    if [[ -z "$(trim "$line")" ]]; then
+      continue
+    fi
+
+    gitlab_group="$(trim "$(csv_value "$line" "$idx_gitlab_group")")"
+    gitlab_project="$(trim "$(csv_value "$line" "$idx_gitlab_project")")"
+    github_org="$(trim "$(csv_value "$line" "$idx_github_org")")"
+    github_repo="$(trim "$(csv_value "$line" "$idx_github_repo")")"
+    visibility="$(trim "$(csv_value "$line" "$idx_visibility")")"
+    include_in_export="$(trim "$(csv_value "$line" "$idx_include")")"
+    exclude_from_export="$(trim "$(csv_value "$line" "$idx_exclude")")"
+
+    visibility="$(validate_visibility "$visibility")"
+
+    if [[ -z "$gitlab_group" || -z "$gitlab_project" || -z "$github_org" || -z "$github_repo" ]]; then
+      log "[WARN] Skipping row $row_num because required values are missing"
+      skipped=$((skipped + 1))
+      continue
+    fi
+
+    total=$((total + 1))
+
+    set +e
+
+    run_one_migration \
+      "$row_num" \
+      "$gitlab_group" \
+      "$gitlab_project" \
+      "$github_org" \
+      "$github_repo" \
+      "$visibility" \
+      "$include_in_export" \
+      "$exclude_from_export"
+
+    rc=$?
+
+    set -e
+
+    if [[ "$rc" -eq 0 ]]; then
+      started=$((started + 1))
+    else
+      failed=$((failed + 1))
+    fi
+
+  done < <(tail -n +2 "$INVENTORY_FILE")
+
+  actual_started="$(awk -F',' 'NR>1 && $7 ~ /STARTED/ {c++} END {print c+0}' "$MIGRATION_OUTPUT_FILE")"
+  actual_failed="$(awk -F',' 'NR>1 {c++} END {print c+0}' "$FAILURE_FILE")"
+
+  log "============================================================"
+  log "Migration Summary"
+  log "============================================================"
+  log "Total rows selected       : $total"
+  log "Total rows skipped        : $skipped"
+  log "Total migrations started  : $actual_started"
+  log "Total migrations failed   : $actual_failed"
+  log "Migration output file     : $MIGRATION_OUTPUT_FILE"
+  log "Failure file              : $FAILURE_FILE"
+  log "Run log                   : $RUN_LOG"
+  log "Verbose logs              : $VERBOSE_DIR"
+  log "============================================================"
+
   echo "export MIGRATION_OUTPUT_FILE=$MIGRATION_OUTPUT_FILE"
-  echo ""
+
+  if [[ "$actual_started" -eq 0 ]]; then
+    fail "No migrations were started. Check $FAILURE_FILE and $RUN_LOG"
+  fi
+
+  if [[ "$actual_failed" -gt 0 ]]; then
+    log "[WARN] Some migrations failed. Review $FAILURE_FILE"
+  fi
 }
 
-# --- Run ---
-process_rows
-print_summary
+main "$@"
