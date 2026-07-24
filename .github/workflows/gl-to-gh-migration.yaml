@@ -255,6 +255,7 @@ jobs:
             gl-gitsizer-readiness-check.out
             logs/
             output_files/git-sizer-readiness/
+            *.log
 
   # ------------------ 3) Manual Approval Gate ------------------
   approve-after-readiness-check:
@@ -331,7 +332,7 @@ jobs:
 
       - name: Upload artifacts
         if: always() # Upload even if migration failed so you can inspect error logs
-        uses: actions/upload-artifact@65c4c4a1ddef5b8228a8a3a0e1b69106a75f80f6 # v4.6.1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.1
         with:
           name: start-repository-migration-artifacts
           retention-days: 7
