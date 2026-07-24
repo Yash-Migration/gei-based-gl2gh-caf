@@ -241,8 +241,8 @@ jobs:
           echo "# 1. Migration Readiness Check"
           ./gl-migration-readiness-check.sh 2>&1 | tee gl-migration-readiness-check.out
 
-          # echo "# 2. GitSizer Check"
-          # ./gl-gitsizer-readiness-check.sh 2>&1 | tee gl-gitsizer-readiness-check.out
+          echo "# 2. GitSizer Check"
+          ./gl-gitsizer-readiness-check.sh 2>&1 | tee gl-gitsizer-readiness-check.out
 
       - name: Upload Readiness Artifacts
         if: always()
