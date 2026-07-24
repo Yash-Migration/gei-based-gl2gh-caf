@@ -306,16 +306,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          unset GH_TOKEN
           echo "[INFO] Logging out of any existing GH CLI sessions..."
-          gh auth logout --hostname "${GH_HOST:-siemens.ghe.com}" || true
+          gh auth logout --hostname "${GH_HOST:-}" || true
           gh auth logout --hostname github.com || true
       
           echo "[INFO] Authenticating to github.com for extension download..."
-          echo "${GH_TOKEN}" | gh auth login --hostname github.com --with-token
+          echo "${GH_TOKEN}" | gh auth login --hostname $GH_HOST --with-token
       
           echo "[INFO] Installing gh-gl2gh extension from public GitHub..."
-          gh extension install github/gh-gl2gh --force
+          gh extension install https://github.com/github/gh-gl2gh --force
       
           echo "[INFO] Verifying extension..."
           gh extension list
