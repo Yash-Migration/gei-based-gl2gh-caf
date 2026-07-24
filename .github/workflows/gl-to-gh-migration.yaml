@@ -309,6 +309,7 @@ jobs:
           set -euo pipefail
 
           # Authenticate GH CLI
+          unset GH_TOKEN
           echo "$GH_PAT" | gh auth login --with-token --hostname "$GH_HOST"
 
           # Install/Upgrade the gh-gl2gh extension (this handles binary download automatically)
