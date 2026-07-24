@@ -962,11 +962,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
 
-      - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: upload-migration-archives-artifacts
-          path: .
+      # - name: Download artifacts
+      #   uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      #   with:
+      #     name: upload-migration-archives-artifacts
+      #     path: .
 
       - name: Cache node_modules
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -1007,10 +1007,10 @@ jobs:
           chmod +x ./start-gl2gh-repo-migration.sh ./runner.sh ./config.sh
           [[ -x "./start-gl2gh-repo-migration.sh" ]] || { echo "[ERROR] start-gl2gh-repo-migration.sh not executable"; exit 1; }
 
-          UPLOADED_ARCHIVES="$(basename "$UPLOADED_ARCHIVES")"
-          export UPLOADED_ARCHIVES="$CI_PROJECT_DIR/output_files/$UPLOADED_ARCHIVES"
-          echo "Rewritten UPLOADED_ARCHIVES = $UPLOADED_ARCHIVES"
-          test -f "$UPLOADED_ARCHIVES" || { echo "[ERROR] Uploaded archives CSV not found: $UPLOADED_ARCHIVES"; exit 1; }
+          # UPLOADED_ARCHIVES="$(basename "$UPLOADED_ARCHIVES")"
+          # export UPLOADED_ARCHIVES="$CI_PROJECT_DIR/output_files/$UPLOADED_ARCHIVES"
+          # echo "Rewritten UPLOADED_ARCHIVES = $UPLOADED_ARCHIVES"
+          # test -f "$UPLOADED_ARCHIVES" || { echo "[ERROR] Uploaded archives CSV not found: $UPLOADED_ARCHIVES"; exit 1; }
 
           echo "[INFO] Initiating GitLab-to-GitHub repository migrations..."
           ./start-gl2gh-repo-migration.sh > start-gl2gh-repo-migration.out 2>&1 || {
