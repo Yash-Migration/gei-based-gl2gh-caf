@@ -1214,116 +1214,116 @@ jobs:
             logs/
 
 
-  # ------------------ Approve before Monitoring ------------------
-  approve-before-monitoring:
-    name: approve-before-monitoring
-    runs-on: ["${{ inputs.RUNNER_LABEL }}"]
-    needs: [display-migration-summary]
-    environment:
-      name: approvers-group   # ✅ MUST configure in GitHub UI
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: start-repository-migration-artifacts
-          path: .
+  # # ------------------ Approve before Monitoring ------------------
+  # approve-before-monitoring:
+  #   name: approve-before-monitoring
+  #   runs-on: ["${{ inputs.RUNNER_LABEL }}"]
+  #   needs: [display-migration-summary]
+  #   environment:
+  #     name: approvers-group   # ✅ MUST configure in GitHub UI
+  #   steps:
+  #     - name: Download artifacts
+  #       uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+  #       with:
+  #         name: start-repository-migration-artifacts
+  #         path: .
   
-      - name: Approval Step
-        shell: bash
-        run: |
-          echo "===================================="
-          echo "MANUAL APPROVAL REQUIRED"
-          echo "===================================="
-          echo
-          echo "Review before monitoring:"
-          echo " - start-gl2gh-repo-migration.out"
-          echo " - output_files/migration-outputs_*.csv"
-          echo
-          echo "Click 'Review deployments' → Approve to continue."
+  #     - name: Approval Step
+  #       shell: bash
+  #       run: |
+  #         echo "===================================="
+  #         echo "MANUAL APPROVAL REQUIRED"
+  #         echo "===================================="
+  #         echo
+  #         echo "Review before monitoring:"
+  #         echo " - start-gl2gh-repo-migration.out"
+  #         echo " - output_files/migration-outputs_*.csv"
+  #         echo
+  #         echo "Click 'Review deployments' → Approve to continue."
           
-  # ------------------ 7) Monitor Repository Migrations ------------------
-  monitor-repository-migrations:
-    name: monitor-repository-migrations
-    runs-on: ["${{ inputs.RUNNER_LABEL }}"]
-    environment: ${{ inputs.ENVIRONMENT_NAME }}
-    env:
-      SOURCE_GL_SERVER_URL: ${{ vars.SOURCE_GL_SERVER_URL }}
-      GITLAB_USERNAME: ${{ vars.GITLAB_USERNAME }}
-      GH_HOST: ${{ vars.GH_HOST }}
-      STORAGE_TYPE: ${{ vars.STORAGE_TYPE }}
-      AZ_CONTAINER: ${{ vars.AZ_CONTAINER }}
-      AWS_BUCKET_NAME: ${{ vars.AWS_BUCKET_NAME }}
-      AWS_REGION: ${{ vars.AWS_REGION }}
-      GITLAB_API_PRIVATE_TOKEN: ${{ secrets.GITLAB_API_PRIVATE_TOKEN }}
-      GH_PAT: ${{ secrets.GH_PAT }}
-      GH_TOKEN: ${{ secrets.GH_PAT }}
-      AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-    needs: [start-repository-migration,approve-before-monitoring]
+  # # ------------------ 7) Monitor Repository Migrations ------------------
+  # monitor-repository-migrations:
+  #   name: monitor-repository-migrations
+  #   runs-on: ["${{ inputs.RUNNER_LABEL }}"]
+  #   environment: ${{ inputs.ENVIRONMENT_NAME }}
+  #   env:
+  #     SOURCE_GL_SERVER_URL: ${{ vars.SOURCE_GL_SERVER_URL }}
+  #     GITLAB_USERNAME: ${{ vars.GITLAB_USERNAME }}
+  #     GH_HOST: ${{ vars.GH_HOST }}
+  #     STORAGE_TYPE: ${{ vars.STORAGE_TYPE }}
+  #     AZ_CONTAINER: ${{ vars.AZ_CONTAINER }}
+  #     AWS_BUCKET_NAME: ${{ vars.AWS_BUCKET_NAME }}
+  #     AWS_REGION: ${{ vars.AWS_REGION }}
+  #     GITLAB_API_PRIVATE_TOKEN: ${{ secrets.GITLAB_API_PRIVATE_TOKEN }}
+  #     GH_PAT: ${{ secrets.GH_PAT }}
+  #     GH_TOKEN: ${{ secrets.GH_PAT }}
+  #     AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+  #     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  #   needs: [start-repository-migration,approve-before-monitoring]
     
-    steps:
-      - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
   
-      - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: start-repository-migration-artifacts
-          path: .
+  #     - name: Download artifacts
+  #       uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+  #       with:
+  #         name: start-repository-migration-artifacts
+  #         path: .
   
-      # ✅ Install GH CLI extension
-      - name: Install gh-ado2gh extension
-        shell: bash
-        run: |
-          set -euo pipefail
-          unset GH_TOKEN
-          echo "$GH_PAT" | gh auth login --with-token --hostname "$GH_HOST"
-          gh auth status
-          gh extension install https://github.com/github/gh-ado2gh || \
-          gh extension upgrade gh-ado2gh
-          gh extension list
+  #     # ✅ Install GH CLI extension
+  #     - name: Install gh-ado2gh extension
+  #       shell: bash
+  #       run: |
+  #         set -euo pipefail
+  #         unset GH_TOKEN
+  #         echo "$GH_PAT" | gh auth login --with-token --hostname "$GH_HOST"
+  #         gh auth status
+  #         gh extension install https://github.com/github/gh-ado2gh || \
+  #         gh extension upgrade gh-ado2gh
+  #         gh extension list
   
-      # ✅ Run your script
-      - name: Run Monitoring Script
-        shell: bash
-        env:
-          MIGRATION_OUTPUT_FILE: ${{ needs.start-repository-migration.outputs.MIGRATION_OUTPUT_FILE_BASENAME }}
-        run: |
-          set -euo pipefail
+  #     # ✅ Run your script
+  #     - name: Run Monitoring Script
+  #       shell: bash
+  #       env:
+  #         MIGRATION_OUTPUT_FILE: ${{ needs.start-repository-migration.outputs.MIGRATION_OUTPUT_FILE_BASENAME }}
+  #       run: |
+  #         set -euo pipefail
 
-          # ✅ Identify correct CSV
-          MIGRATION_OUTPUT_FILE="$(basename "$MIGRATION_OUTPUT_FILE")"
-          export MIGRATION_OUTPUT_FILE="$CI_PROJECT_DIR/output_files/$MIGRATION_OUTPUT_FILE"
+  #         # ✅ Identify correct CSV
+  #         MIGRATION_OUTPUT_FILE="$(basename "$MIGRATION_OUTPUT_FILE")"
+  #         export MIGRATION_OUTPUT_FILE="$CI_PROJECT_DIR/output_files/$MIGRATION_OUTPUT_FILE"
 
-          test -f "$MIGRATION_OUTPUT_FILE" || {
-            echo "[ERROR] Migration output file not found: $MIGRATION_OUTPUT_FILE"
-            exit 1
-          }
+  #         test -f "$MIGRATION_OUTPUT_FILE" || {
+  #           echo "[ERROR] Migration output file not found: $MIGRATION_OUTPUT_FILE"
+  #           exit 1
+  #         }
   
-          echo "[INFO] MIGRATION_OUTPUT_FILE: $MIGRATION_OUTPUT_FILE"
+  #         echo "[INFO] MIGRATION_OUTPUT_FILE: $MIGRATION_OUTPUT_FILE"
   
-          chmod +x ./gl2gh-monitor-migration-status.sh
-          ./gl2gh-monitor-migration-status.sh
+  #         chmod +x ./gl2gh-monitor-migration-status.sh
+  #         ./gl2gh-monitor-migration-status.sh
 
-      - name: Publish Monitor Summary to Dashboard
-        if: always()
-        shell: bash
-        run: |
-          if [ -f output_files/migration-status-*.csv ]; then
-            echo "### Migration Monitoring Summary" >> $GITHUB_STEP_SUMMARY
-            echo "Artifact summaries successfully generated." >> $GITHUB_STEP_SUMMARY
-          fi
+  #     - name: Publish Monitor Summary to Dashboard
+  #       if: always()
+  #       shell: bash
+  #       run: |
+  #         if [ -f output_files/migration-status-*.csv ]; then
+  #           echo "### Migration Monitoring Summary" >> $GITHUB_STEP_SUMMARY
+  #           echo "Artifact summaries successfully generated." >> $GITHUB_STEP_SUMMARY
+  #         fi
           
-      - name: Upload artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: monitor-repository-migrations-artifacts
-          retention-days: 7
-          path: |
-            gl2gh-monitor-migration-status.out
-            output_files/
-            logs/
+  #     - name: Upload artifacts
+  #       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+  #       with:
+  #         name: monitor-repository-migrations-artifacts
+  #         retention-days: 7
+  #         path: |
+  #           gl2gh-monitor-migration-status.out
+  #           output_files/
+  #           logs/
             
 # ------------------ 8) Post-Migration-Validation ------------------
   post-migration-validation:
@@ -1345,7 +1345,7 @@ jobs:
       AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-    needs: [monitor-repository-migrations]
+    needs: [display-migration-summary]
     
     steps:
       - name: Checkout
