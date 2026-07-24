@@ -306,6 +306,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          unset GH_TOKEN
           echo "[INFO] Logging out of any existing GH CLI sessions..."
           gh auth logout --hostname "${GH_HOST:-}" || true
           gh auth logout --hostname github.com || true
