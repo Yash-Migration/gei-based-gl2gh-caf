@@ -48,7 +48,7 @@ jobs:
       GH_PAT: ${{ secrets.GH_PAT }}
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
 
       - name: getting-env-ready
         shell: bash
@@ -173,7 +173,7 @@ jobs:
     needs: [getting-env-ready]
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
 
       - name: validate-prerequisites
         shell: bash
@@ -226,7 +226,7 @@ jobs:
     needs: [validate-prerequisites]
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
 
       - name: Pre-Migration Readiness Check
         shell: bash
@@ -254,7 +254,7 @@ jobs:
 
       - name: Upload Readiness Artifacts
         if: always()
-        uses: actions/upload-artifact@4bec3508f0fb8442805494d4a84fa9449f05ee46 # v4.6.2
+        uses: actions/upload-artifact@65c4c4a1ddef5b8228a8a3a0e1b69106a75f80f6
         with:
           name: pre-migration-readiness-check-artifacts
           retention-days: 7
@@ -273,7 +273,7 @@ jobs:
       name: approvers-group
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        uses: actions/download-artifact@fa2a91b02d5060824ba95d8525b3992b157476ae # v4.1.8
         with:
           name: pre-migration-readiness-check-artifacts
           path: .
@@ -305,7 +305,7 @@ jobs:
       MIGRATION_OUTPUT_FILE_BASENAME: ${{ steps.capture.outputs.MIGRATION_OUTPUT_FILE_BASENAME }}
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
 
       - name: start-repository-migration
         shell: bash
@@ -341,7 +341,7 @@ jobs:
           echo "MIGRATION_OUTPUT_FILE_BASENAME=$(basename "$MIGRATION_OUTPUT_FILE")" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@4bec3508f0fb8442805494d4a84fa9449f05ee46 # v4.6.2
+        uses: actions/upload-artifact@65c4c4a1ddef5b8228a8a3a0e1b69106a75f80f6 # v4.6.1 # v4.6.2
         with:
           name: start-repository-migration-artifacts
           retention-days: 7
@@ -359,16 +359,16 @@ jobs:
     needs: [start-repository-migration]
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
 
       - name: Download readiness artifacts
-        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        uses: actions/download-artifact@fa2a91b02d5060824ba95d8525b3992b157476ae # v4.1.8 # v4.1.9
         with:
           name: pre-migration-readiness-check-artifacts
           path: .
 
       - name: Download migration artifacts
-        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        uses: actions/download-artifact@fa2a91b02d5060824ba95d8525b3992b157476ae # v4.1.8 # v4.1.9
         with:
           name: start-repository-migration-artifacts
           path: .
@@ -418,7 +418,7 @@ jobs:
           } | tee "$SUMMARY_FILE"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@4bec3508f0fb8442805494d4a84fa9449f05ee46 # v4.6.2
+        uses: actions/upload-artifact@65c4c4a1ddef5b8228a8a3a0e1b69106a75f80f6 # v4.6.1 # v4.6.2
         with:
           name: display-migration-summary-artifacts
           retention-days: 7
@@ -444,7 +444,7 @@ jobs:
     needs: [display-migration-summary]
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
 
       - name: Run Post Validation Script
         shell: bash
@@ -455,7 +455,7 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@4bec3508f0fb8442805494d4a84fa9449f05ee46 # v4.6.2
+        uses: actions/upload-artifact@65c4c4a1ddef5b8228a8a3a0e1b69106a75f80f6 # v4.6.1 # v4.6.2
         with:
           name: post-migration-validation-artifacts
           retention-days: 7
