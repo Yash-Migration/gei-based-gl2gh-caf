@@ -300,49 +300,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Install/Update GEI Extension
+      - name: Setup GH CLI Extensions & Start Migration
         shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          echo "====================="
+          echo "# Direct gl2gh Migrations"
+          echo "====================="
           set -euo pipefail
+
+          # Authenticate GH CLI
           unset GH_TOKEN
-          echo "[INFO] Logging out of any existing GH CLI sessions..."
-          gh auth logout --hostname "${GH_HOST:-}" || true
-          gh auth logout --hostname github.com || true
-      
-          echo "[INFO] Authenticating to github.com for extension download..."
-          echo "${GH_TOKEN}" | gh auth login --hostname $GH_HOST --with-token
-      
-          echo "[INFO] Installing gh-gl2gh extension from public GitHub..."
-          gh extension install https://github.com/github/gh-gl2gh --force
-      
-          echo "[INFO] Verifying extension..."
-          gh extension list
-      
-          echo "[INFO] Authenticating to target GitHub Enterprise..."
-      
-          if [[ -n "${GH_HOST:-}" ]]; then
-            echo "${GH_PAT}" | gh auth login \
-              --hostname "${GH_HOST}" \
-              --with-token
-          fi
-      
-          echo "[INFO] Verifying gh-gl2gh availability..."
-          gh gl2gh version
+          echo "$GH_PAT" | gh auth login --with-token --hostname "$GH_HOST"
 
-      - name: Start Migration
-        shell: bash
-        run: |
-          echo "====================="
-          echo "# gl2gh Migrations"
-          echo "====================="
-          set -euo pipefail
-          
-          echo "[INFO] Installed Extensions:"
-          gh extension list
+          # 1. Install/Upgrade the gh-gl2gh extension
+          echo "[INFO] Installing gh-gl2gh extension..."
+          gh extension install https://github.com/github/gh-gl2gh \
+            || gh extension upgrade gh-gl2gh \
+            || true
 
-          # Create log directories
+          # 2. Install the gl2gh underlying binary tool
+          echo "[INFO] Installing gl2gh tool binary..."
+          gh gl2gh install || true
+
+          # 3. Create log directories
           mkdir -p logs output_files logs/gl2gh-verbose-logs
 
           chmod +x ./start-gl2gh-repo-migration.sh
