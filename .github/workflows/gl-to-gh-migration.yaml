@@ -300,7 +300,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Create Log Directories & Start Migration
+      - name: Setup GH CLI Extensions & Start Migration
         shell: bash
         run: |
           echo "====================="
@@ -308,16 +308,21 @@ jobs:
           echo "====================="
           set -euo pipefail
 
+          # Authenticate GH CLI
           unset GH_TOKEN
           echo "$GH_PAT" | gh auth login --with-token --hostname "$GH_HOST"
 
-          gh auth status --hostname "$GH_HOST"
-
+          # 1. Install/Upgrade the gh-gl2gh extension
+          echo "[INFO] Installing gh-gl2gh extension..."
           gh extension install https://github.com/github/gh-gl2gh \
             || gh extension upgrade gh-gl2gh \
             || true
-            
-          # Ensure required log and output folders exist so upload-artifact doesn't fail
+
+          # 2. Install the gl2gh underlying binary tool
+          echo "[INFO] Installing gl2gh tool binary..."
+          gh gl2gh install || true
+
+          # 3. Create log directories
           mkdir -p logs output_files logs/gl2gh-verbose-logs
 
           chmod +x ./start-gl2gh-repo-migration.sh
