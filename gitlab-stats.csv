@@ -1,2 +1,3 @@
 Namespace,Project,Commit_Count,Branch_Count,Full_URL,github_org,github_repo,gh_repo_visibility,include_in_export,exclude_from_export
-test-migration,test-project,4,1,https://code.siemens.com/test-migration/test-project,OSES-Migration,yash-test-project-2,internal,,
+test-migration,test-project,4,1,https://code.siemens.com/test-migration/test-project,OSES-Migration,yash-test-project-1,internal,,
+test-migration,test-project2,4,1,https://code.siemens.com/test-migration/test-project,OSES-Migration,yash-test-project-2,internal,,
