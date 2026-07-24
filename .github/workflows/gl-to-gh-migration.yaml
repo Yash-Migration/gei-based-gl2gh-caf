@@ -300,30 +300,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Install/Update GEI extension
+      - name: Install/Update GEI Extension
         shell: bash
         env:
-          # Use standard runner token or a public PAT to authenticate with public api.github.com
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-
-          echo "[INFO] Installing gh-gl2gh extension from public GitHub..."
           unset GH_TOKEN
-          # Pass extension repository name (not full URL)
-          gh extension install github/gh-gl2gh --force || true
-
-          echo "[INFO] Authenticating gh CLI with Target GitHub Enterprise ($GH_HOST)..."
-          if [[ -z "${GH_HOST:-}" ]]; then
-              echo "$GH_PAT" | gh auth login --with-token
-          else
-              echo "$GH_PAT" | gh auth login --hostname "$GH_HOST" --with-token
+          echo "[INFO] Logging out of any existing GH CLI sessions..."
+          gh auth logout --hostname "${GH_HOST:-siemens.ghe.com}" || true
+          gh auth logout --hostname github.com || true
+      
+          echo "[INFO] Authenticating to github.com for extension download..."
+          echo "${GH_TOKEN}" | gh auth login --hostname github.com --with-token
+      
+          echo "[INFO] Installing gh-gl2gh extension from public GitHub..."
+          gh extension install github/gh-gl2gh --force
+      
+          echo "[INFO] Verifying extension..."
+          gh extension list
+      
+          echo "[INFO] Authenticating to target GitHub Enterprise..."
+      
+          if [[ -n "${GH_HOST:-}" ]]; then
+            echo "${GH_PAT}" | gh auth login \
+              --hostname "${GH_HOST}" \
+              --with-token
           fi
+      
+          echo "[INFO] Verifying gh-gl2gh availability..."
+          gh gl2gh version
 
-          echo "[INFO] Verifying gh-gl2gh binary availability..."
-          gh gl2gh --help >/dev/null
-
-      - name: Setup GH CLI Extensions & Start Migration
+      - name: Start Migration
         shell: bash
         run: |
           echo "====================="
