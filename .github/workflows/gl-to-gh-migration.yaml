@@ -241,14 +241,14 @@ jobs:
           echo "# 1. Migration Readiness Check"
           ./gl-migration-readiness-check.sh > gl-migration-readiness-check.out 2>&1 || {
             echo "[ERROR] Migration readiness check failed"
-            cat gl-migration-readiness-check.out
+            cat logs/migration_readiness*
             exit 1
           }
 
           echo "# 2. GitSizer Check"
           ./gl-gitsizer-readiness-check.sh > gl-gitsizer-readiness-check.out 2>&1 || {
             echo "[ERROR] GitSizer readiness check failed"
-            cat gl-gitsizer-readiness-check.out
+            cat logs/gl-gitsizer*
             exit 1
           }
 
@@ -324,7 +324,7 @@ jobs:
             exit 1
           }
 
-          cat start-gl2gh-repo-migration.out
+          tail -f start-gl2gh-repo-migration.out
 
           MIGRATION_EXPORT="$(grep -E '^export[[:space:]]+MIGRATION_OUTPUT_FILE=' start-gl2gh-repo-migration.out || true)"
           [[ -n "$MIGRATION_EXPORT" ]] || { echo "[ERROR] MIGRATION_OUTPUT_FILE export line not found"; exit 1; }
@@ -350,6 +350,7 @@ jobs:
             start-repository-migration-output-var.env
             output_files/
             logs/
+            *verbose*
 
   # ------------------ 5) Display Migration Summary ------------------
   display-migration-summary:
