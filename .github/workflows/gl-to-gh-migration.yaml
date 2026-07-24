@@ -239,18 +239,10 @@ jobs:
           chmod +x ./gl-migration-readiness-check.sh ./gl-gitsizer-readiness-check.sh
 
           echo "# 1. Migration Readiness Check"
-          ./gl-migration-readiness-check.sh > gl-migration-readiness-check.out 2>&1 || {
-            echo "[ERROR] Migration readiness check failed"
-            cat logs/migration_readiness*
-            exit 1
-          }
+          ./gl-migration-readiness-check.sh 2>&1 | tee gl-migration-readiness-check.out
 
           echo "# 2. GitSizer Check"
-          ./gl-gitsizer-readiness-check.sh > gl-gitsizer-readiness-check.out 2>&1 || {
-            echo "[ERROR] GitSizer readiness check failed"
-            cat logs/gl-gitsizer*
-            exit 1
-          }
+          ./gl-gitsizer-readiness-check.sh 2>&1 | tee gl-gitsizer-readiness-check.out
 
       - name: Upload Readiness Artifacts
         if: always()
@@ -305,9 +297,9 @@ jobs:
       MIGRATION_OUTPUT_FILE_BASENAME: ${{ steps.capture.outputs.MIGRATION_OUTPUT_FILE_BASENAME }}
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: start-repository-migration
+      - name: Create Log Directories & Start Migration
         shell: bash
         run: |
           echo "====================="
@@ -315,16 +307,13 @@ jobs:
           echo "====================="
           set -euo pipefail
 
+          # Ensure required log and output folders exist so upload-artifact doesn't fail
+          mkdir -p logs output_files logs/gl2gh-verbose-logs
+
           chmod +x ./start-gl2gh-repo-migration.sh
           
           echo "[INFO] Initiating direct GitLab-to-GitHub repository migrations..."
-          ./start-gl2gh-repo-migration.sh > start-gl2gh-repo-migration.out 2>&1 || {
-            echo "[ERROR] Migration initiation failed"
-            cat start-gl2gh-repo-migration.out
-            exit 1
-          }
-
-          tail -f start-gl2gh-repo-migration.out
+          ./start-gl2gh-repo-migration.sh 2>&1 | tee start-gl2gh-repo-migration.out
 
           MIGRATION_EXPORT="$(grep -E '^export[[:space:]]+MIGRATION_OUTPUT_FILE=' start-gl2gh-repo-migration.out || true)"
           [[ -n "$MIGRATION_EXPORT" ]] || { echo "[ERROR] MIGRATION_OUTPUT_FILE export line not found"; exit 1; }
@@ -341,7 +330,8 @@ jobs:
           echo "MIGRATION_OUTPUT_FILE_BASENAME=$(basename "$MIGRATION_OUTPUT_FILE")" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.1 # v4.6.2
+        if: always() # Upload even if migration failed so you can inspect error logs
+        uses: actions/upload-artifact@65c4c4a1ddef5b8228a8a3a0e1b69106a75f80f6 # v4.6.1
         with:
           name: start-repository-migration-artifacts
           retention-days: 7
@@ -349,8 +339,7 @@ jobs:
             start-gl2gh-repo-migration.out
             start-repository-migration-output-var.env
             output_files/
-            logs/
-            *verbose*
+            logs/**
 
   # ------------------ 5) Display Migration Summary ------------------
   display-migration-summary:
