@@ -292,7 +292,7 @@ jobs:
       TARGET_UPLOADS_URL: ${{ vars.TARGET_UPLOADS_URL }}
       GITLAB_API_PRIVATE_TOKEN: ${{ secrets.GITLAB_API_PRIVATE_TOKEN }}
       GH_PAT: ${{ secrets.GH_PAT }}
-      # GH_TOKEN: ${{ secrets.GH_PAT }}
+      GH_TOKEN: ${{ secrets.GH_PAT }}
     needs: [approve-after-readiness-check]
     outputs:
       MIGRATION_OUTPUT_FILE_BASENAME: ${{ steps.capture.outputs.MIGRATION_OUTPUT_FILE_BASENAME }}
@@ -309,6 +309,7 @@ jobs:
           set -euo pipefail
 
           echo "[INFO] Installing gh-gl2gh extension from public GitHub..."
+          unset GH_TOKEN
           # Pass extension repository name (not full URL)
           gh extension install github/gh-gl2gh --force || true
 
