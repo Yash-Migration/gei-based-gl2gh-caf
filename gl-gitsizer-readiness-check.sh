@@ -153,7 +153,9 @@ install_git_sizer() {
   fi
 
   ASSET_URL="$(
-    curl -fsSL "https://api.github.com/repos/github/git-sizer/releases/latest" |
+    curl -fsSL \
+           ${GH_PAT:+-H "Authorization: Bearer $GH_PAT"} \
+           -O"https://api.github.com/repos/github/git-sizer/releases/latest" |
       jq -r '.assets[]
         | select(.name | test("linux-amd64.*\\.zip$"))
         | .browser_download_url' |
