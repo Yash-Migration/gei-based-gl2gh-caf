@@ -26,13 +26,11 @@ on:
 permissions:
   contents: read
   actions: read
-  
+
 # ------------------ Global Variables ------------------
 env:
   DEBIAN_FRONTEND: "noninteractive"
   CI_PROJECT_DIR: ${{ github.workspace }}
-
-  # User inputs
   INVENTORY_FILE: ${{ inputs.INVENTORY_FILE }}
   GITHUB_TYPE: ${{ inputs.GITHUB_TYPE }}
 
@@ -46,29 +44,11 @@ jobs:
       SOURCE_GL_SERVER_URL: ${{ vars.SOURCE_GL_SERVER_URL }}
       GITLAB_USERNAME: ${{ vars.GITLAB_USERNAME }}
       GH_HOST: ${{ vars.GH_HOST }}
-      STORAGE_TYPE: ${{ vars.STORAGE_TYPE }}
-      AZ_CONTAINER: ${{ vars.AZ_CONTAINER }}
-      AWS_BUCKET_NAME: ${{ vars.AWS_BUCKET_NAME }}
-      AWS_REGION: ${{ vars.AWS_REGION }}
       GITLAB_API_PRIVATE_TOKEN: ${{ secrets.GITLAB_API_PRIVATE_TOKEN }}
       GH_PAT: ${{ secrets.GH_PAT }}
-      GH_TOKEN: ${{ secrets.GH_PAT }}
-      AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      GLXREPO_GH_PAT: ${{ secrets.GLXREPO_GH_PAT }}
-      GL_EXPORTER_REPO_URL: ${{ vars.GL_EXPORTER_REPO_URL }}
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
-
-      - name: Cache node_modules
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: node_modules/
-          key: ${{ runner.os }}-node_modules-${{ hashFiles('package-lock.json', 'package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node_modules-
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: getting-env-ready
         shell: bash
@@ -80,10 +60,7 @@ jobs:
 
           echo "[INFO] Checking OS version..."
           source /etc/os-release
-
-          echo "================================"
           echo "OS: $PRETTY_NAME"
-          echo "================================"
 
           if [[ "${ID:-}" != "ubuntu" ]]; then
             echo "[ERROR] Ubuntu is required. Current OS: $PRETTY_NAME"
@@ -92,7 +69,6 @@ jobs:
 
           # Check sudo access
           HAS_SUDO="false"
-
           if sudo -n true >/dev/null 2>&1; then
             HAS_SUDO="true"
             echo "[INFO] User has sudo access."
@@ -100,25 +76,19 @@ jobs:
             echo "[INFO] User does NOT have sudo access."
           fi
 
-          # Track missing items and actions
           declare -a MISSING_PACKAGES=()
           declare -a ACTION_ITEMS=()
 
-          printf '\n'
-          echo "[INFO] Validating required tooling..."
-
+          echo "[INFO] Validating required CLI tooling..."
           declare -A REQUIRED_COMMANDS=(
             ["curl"]="curl"
             ["jq"]="jq"
             ["git"]="git"
-            ["docker"]="docker.io"
-            ["node"]="nodejs"
-            ["npm"]="npm"
+            ["python3"]="python3"
           )
 
           for cmd in "${!REQUIRED_COMMANDS[@]}"; do
             package="${REQUIRED_COMMANDS[$cmd]}"
-
             if command -v "$cmd" >/dev/null 2>&1; then
               echo "[INFO] $cmd detected: $($cmd --version | head -n1)"
             else
@@ -127,14 +97,8 @@ jobs:
             fi
           done
 
-          # Install missing packages
           if [[ "${#MISSING_PACKAGES[@]}" -gt 0 ]]; then
-            printf '\n'
-            echo "[INFO] Missing packages detected:"
-            printf ' - %s\n' "${MISSING_PACKAGES[@]}"
-
             if [[ "$HAS_SUDO" == "true" ]]; then
-              printf '\n'
               echo "[INFO] Installing missing packages..."
               sudo apt-get update -y
               sudo apt-get install -y "${MISSING_PACKAGES[@]}"
@@ -145,42 +109,18 @@ jobs:
             fi
           fi
 
-          # Validate Docker access
-          printf '\n'
-          echo "[INFO] Validating Docker access..."
-
-          if command -v docker >/dev/null 2>&1; then
-            if ! docker ps >/dev/null 2>&1; then
-              echo "[WARN] Docker installed but runner user lacks access."
-              ACTION_ITEMS+=("Add runner user to docker group")
-            else
-              echo "[INFO] Docker access verified."
-            fi
-          fi
-
-          # Validate GitHub CLI
-          printf '\n'
-          echo "[INFO] Validating GitHub CLI..."
-
+          # Validate / Install GitHub CLI
           if command -v gh >/dev/null 2>&1; then
             echo "[INFO] GitHub CLI detected: $(gh --version | head -n1)"
           else
-            echo "[WARN] GitHub CLI is NOT installed."
-
             if [[ "$HAS_SUDO" == "true" ]]; then
-              printf '\n'
               echo "[INFO] Installing GitHub CLI..."
-
               sudo mkdir -p -m 755 /etc/apt/keyrings
-
               curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
                 sudo dd of=/etc/apt/keyrings/githubcli-archive-keyring.gpg
-
               sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-
               echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | \
                 sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-
               sudo apt-get update -y
               sudo apt-get install -y gh
             else
@@ -188,111 +128,34 @@ jobs:
             fi
           fi
 
-          # Final validation summary
           if [[ "${#ACTION_ITEMS[@]}" -gt 0 && "$HAS_SUDO" != "true" ]]; then
-            printf '\n'
-            echo "======================================================"
-            echo "[ERROR] Runner prerequisite validation failed"
-            echo "======================================================"
-            echo "[ACTION REQUIRED] Please complete the following:"
+            echo "[ERROR] Prerequisite validation failed. Actions required:"
             printf ' - %s\n' "${ACTION_ITEMS[@]}"
             exit 1
           fi
 
-          # Install npm packages
-          printf '\n'
-          echo "[INFO] Installing npm packages..."
-          echo "--------------------------------"
-
-          if [[ -f package-lock.json ]]; then
-            npm ci --silent
-          else
-            npm install @octokit/rest @octokit/graphql
-          fi
-
-          # Final verification
-          printf '\n'
-          echo "[INFO] Final verification..."
-          echo "Docker Version : $(docker --version)"
-          echo "Node Version   : $(node --version)"
-          echo "npm Version    : $(npm --version)"
-          echo "GH CLI Version : $(gh --version | head -n1)"
-          
-          if [[ "$STORAGE_TYPE" == "AZURE" ]]; then
-              command -v az >/dev/null 2>&1 || {
-                  echo "[ERROR] Azure CLI (az) is required for STORAGE_TYPE=AZURE"
-                  exit 1
-              }
-              echo "[INFO] Azure CLI detected: $(az version | jq -r '."azure-cli"')"
-          fi
-
-          if [[ "$STORAGE_TYPE" == "AWS" ]]; then
-              command -v aws >/dev/null 2>&1 || {
-                  echo "[ERROR] AWS CLI (aws) is required for STORAGE_TYPE=AWS"
-                  exit 1
-              }
-          
-              echo "[INFO] AWS CLI detected: $(aws --version)"
-          fi
-          
-          printf '\n'
-          echo "[INFO] Listing npm packages..."
-          npm list @octokit/rest @octokit/graphql || true
-
-          # GitHub CLI extensions
-          printf '\n'
+          # Authenticate and Install Extensions
           echo "[INFO] Installing GitHub CLI extensions..."
+          [[ -n ${GH_PAT:-} ]] || { echo "[ERROR] GH_PAT is required"; exit 1; }
+          [[ -n ${GH_HOST:-} ]] || { echo "[ERROR] GH_HOST is required"; exit 1; }
 
-          # Validate GH variables before use
-          [[ -n ${GH_PAT:-} ]] || {
-            echo "[ERROR] GH_PAT is required"
-            exit 1
-          }
-    
-          [[ -n ${GH_HOST:-} ]] || {
-            echo "[ERROR] GH_HOST is required"
-            exit 1
-          }
-          
-          # Unset GH_TOKEN before authenticating and installing GH extensions
           unset GH_TOKEN
+          echo "$GH_PAT" | gh auth login --with-token --hostname "$GH_HOST"
 
-          # Authenticate to GH
-          echo "Login to Github"
-          echo "$GH_PAT" | gh auth login --with-token --hostname $GH_HOST
+          gh auth status --hostname "$GH_HOST"
 
-          # Install Extensions
-          gh extension install https://github.com/mona-actions/gh-gitlab-stats || gh extension upgrade gh-gitlab-stats || true
-          gh extension install https://github.com/mona-actions/gh-migration-monitor || gh extension upgrade gh-migration-monitor || true
-          gh extension install https://github.com/github/gh-ado2gh || gh extension upgrade gh-ado2gh || true
-  
-          # Verify GH extensions
-          echo "[INFO] Verifying GitHub CLI extensions..."
-          EXTENSIONS="$(gh extension list)"
-          echo "$EXTENSIONS" | grep -q "gh-gitlab-stats" || {
-            echo "[ERROR] gh-gitlab-stats extension missing"
-            exit 1
-          }
-          echo "$EXTENSIONS" | grep -q "gh-migration-monitor" || {
-            echo "[ERROR] gh-migration-monitor extension missing"
-            exit 1
-          }
-          echo "$EXTENSIONS" | grep -q "ado2gh" || {
-            echo "[ERROR] gh-ado2gh extension missing"
-            exit 1
-          }
-          
-          printf '\n'
-          echo "[INFO] Installed GH extensions:"
+          gh extension install https://github.com/github/gh-gl2gh \
+            || gh extension upgrade gh-gl2gh \
+            || true
+
+          gh extension install mona-actions/gh-gitlab-stats || gh extension upgrade gh-gitlab-stats || true
+
+          # Install gh-gl2gh extension dependency binary
+          echo "[INFO] Installing gl2gh tool binary..."
+          gh gl2gh install || true
+
+          echo "[INFO] Installed Extensions:"
           gh extension list
-
-          # Disk check
-          printf '\n'
-          echo "================================"
-          echo "[INFO] Disk Space Information"
-          echo "================================"
-          df -h /
-          printf '\n'
 
   # ------------------ 1) Validate Prerequisites ------------------
   validate-prerequisites:
@@ -303,30 +166,14 @@ jobs:
       SOURCE_GL_SERVER_URL: ${{ vars.SOURCE_GL_SERVER_URL }}
       GITLAB_USERNAME: ${{ vars.GITLAB_USERNAME }}
       GH_HOST: ${{ vars.GH_HOST }}
-      STORAGE_TYPE: ${{ vars.STORAGE_TYPE }}
-      AZ_CONTAINER: ${{ vars.AZ_CONTAINER }}
-      AWS_BUCKET_NAME: ${{ vars.AWS_BUCKET_NAME }}
-      AWS_REGION: ${{ vars.AWS_REGION }}
+      TARGET_API_URL: ${{ vars.TARGET_API_URL }}
+      TARGET_UPLOADS_URL: ${{ vars.TARGET_UPLOADS_URL }}
       GITLAB_API_PRIVATE_TOKEN: ${{ secrets.GITLAB_API_PRIVATE_TOKEN }}
       GH_PAT: ${{ secrets.GH_PAT }}
-      GH_TOKEN: ${{ secrets.GH_PAT }}
-      AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      GLXREPO_GH_PAT: ${{ secrets.GLXREPO_GH_PAT }}
-      GL_EXPORTER_REPO_URL: ${{ vars.GL_EXPORTER_REPO_URL }}
     needs: [getting-env-ready]
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
-
-      - name: Cache node_modules
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: node_modules/
-          key: ${{ runner.os }}-node_modules-${{ hashFiles('package-lock.json', 'package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node_modules-
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: validate-prerequisites
         shell: bash
@@ -336,274 +183,78 @@ jobs:
           echo "============================"
           set -euo pipefail
 
-          echo "[INFO] Validating required environment variables..."
-
-          # Validate GITHUB_TYPE input
-          if [[ "$GITHUB_TYPE" == "GitHub" ]]; then
-            echo "[INFO] GITHUB_TYPE:$GITHUB_TYPE"
-          elif [[ "$GITHUB_TYPE" == "GitHubDR" ]]; then
-            echo "[INFO] GITHUB_TYPE:$GITHUB_TYPE"
-          else
-            echo "[ERROR] Invalid GITHUB_TYPE: $GITHUB_TYPE"
-            echo "Allowed values: GitHub or GitHubDR"
-            exit 1
-          fi
-
           [[ -n ${SOURCE_GL_SERVER_URL:-} ]] || { echo "[ERROR] SOURCE_GL_SERVER_URL is required"; exit 1; }
           [[ -n ${GITLAB_API_PRIVATE_TOKEN:-} ]] || { echo "[ERROR] GITLAB_API_PRIVATE_TOKEN is required"; exit 1; }
           [[ -n ${GITLAB_USERNAME:-} ]] || { echo "[ERROR] GITLAB_USERNAME is required"; exit 1; }
           [[ -n ${GH_PAT:-} ]] || { echo "[ERROR] GH_PAT is required"; exit 1; }
           [[ -n ${GH_HOST:-} ]] || { echo "[ERROR] GH_HOST is required"; exit 1; }
+          [[ -n ${TARGET_API_URL:-} ]] || { echo "[ERROR] TARGET_API_URL is required"; exit 1; }
+          [[ -n ${TARGET_UPLOADS_URL:-} ]] || { echo "[ERROR] TARGET_UPLOADS_URL is required"; exit 1; }
           [[ -n ${INVENTORY_FILE:-} ]] || { echo "[ERROR] INVENTORY_FILE is required"; exit 1; }
-          [[ -n ${STORAGE_TYPE:-} ]] || { echo "[ERROR] STORAGE_TYPE is required (GITHUB or AZURE or AWS)"; exit 1; }
-          [[ -n ${GLXREPO_GH_PAT:-} ]] || { echo "[ERROR] GLXREPO_GH_PAT is required"; exit 1; }
-          [[ -n ${GL_EXPORTER_REPO_URL:-} ]] || { echo "[ERROR] GL_EXPORTER_REPO_URL is required"; exit 1; }
 
-          if [[ "$STORAGE_TYPE" == "AZURE" ]]; then
-            [[ -n ${AZ_CONTAINER:-} ]] || { echo "[ERROR] AZ_CONTAINER is required"; exit 1; }
-            [[ -n ${AZURE_STORAGE_CONNECTION_STRING:-} ]] || { echo "[ERROR] AZURE_STORAGE_CONNECTION_STRING is required"; exit 1; }
-            echo "[INFO] STORAGE_TYPE: AZURE"
-          elif [[ "$STORAGE_TYPE" == "AWS" ]]; then
-            [[ -n ${AWS_BUCKET_NAME:-} ]] || { echo "[ERROR] AWS_BUCKET_NAME is required"; exit 1; }
-            [[ -n ${AWS_REGION:-} ]] || { echo "[ERROR] AWS_REGION is required"; exit 1; }
-            [[ -n ${AWS_ACCESS_KEY_ID:-} ]] || { echo "[ERROR] AWS_ACCESS_KEY_ID is required"; exit 1; }
-            [[ -n ${AWS_SECRET_ACCESS_KEY:-} ]] || { echo "[ERROR] AWS_SECRET_ACCESS_KEY is required"; exit 1; }
-            echo "[INFO] STORAGE_TYPE: AWS"
-          elif [[ "$STORAGE_TYPE" == "GITHUB" ]]; then
-            echo "[INFO] STORAGE_TYPE: GITHUB"
-          else
-            echo "[ERROR] STORAGE_TYPE must be GITHUB or AZURE or AWS"
-            exit 1
-          fi
+          echo "Environment Variables Confirmed:"
+          echo " - SOURCE_GL_SERVER_URL = $SOURCE_GL_SERVER_URL"
+          echo " - GITLAB_USERNAME      = $GITLAB_USERNAME"
+          echo " - INVENTORY_FILE       = $INVENTORY_FILE"
+          echo " - GH_HOST              = $GH_HOST"
+          echo " - TARGET_API_URL       = $TARGET_API_URL"
+          echo " - TARGET_UPLOADS_URL   = $TARGET_UPLOADS_URL"
 
-          printf '\n'
-          echo "Environmental Variables"
-          echo "-----------------------"
-          echo " - SOURCE_GL_SERVER_URL       = $SOURCE_GL_SERVER_URL"
-          echo " - GITLAB_USERNAME            = $GITLAB_USERNAME"
-          echo " - INVENTORY_FILE             = $INVENTORY_FILE"
-          echo " - GITHUB_TYPE                = $GITHUB_TYPE"
-          echo " - GH_HOST                    = $GH_HOST"
-          echo " - STORAGE_TYPE               = $STORAGE_TYPE"
-
-          if [[ "$STORAGE_TYPE" == "AZURE" ]]; then
-            echo " - AZ_CONTAINER               = $AZ_CONTAINER"
-          elif [[ "$STORAGE_TYPE" == "AWS" ]]; then
-            echo " - AWS_BUCKET_NAME            = $AWS_BUCKET_NAME"
-            echo " - AWS_REGION                 = $AWS_REGION"
-          fi
-          printf '\n'
-          echo "Validating required scripts exist and are executable"
-          echo "----------------------------------------------------"
-
-          test -f ./runner.sh || { echo "[ERROR] runner.sh not found"; exit 1; }
-          test -f ./config.sh || { echo "[ERROR] config.sh not found"; exit 1; }
+          echo "[INFO] Validating script availability..."
           test -f ./gl-migration-readiness-check.sh || { echo "[ERROR] gl-migration-readiness-check.sh not found"; exit 1; }
           test -f ./gl-gitsizer-readiness-check.sh || { echo "[ERROR] gl-gitsizer-readiness-check.sh not found"; exit 1; }
-          test -f ./generate-gl-migration-archive.sh || { echo "[ERROR] generate-gl-migration-archive.sh not found"; exit 1; }
-          test -f ./upload-gl-migration-archive.sh || { echo "[ERROR] upload-gl-migration-archive.sh not found"; exit 1; }
           test -f ./start-gl2gh-repo-migration.sh || { echo "[ERROR] start-gl2gh-repo-migration.sh not found"; exit 1; }
-          test -f ./gl2gh-monitor-migration-status.sh || { echo "[ERROR] gl2gh-monitor-migration-status.sh not found"; exit 1; }
           test -f ./gl-post-migration-validation.sh || { echo "[ERROR] gl-post-migration-validation.sh not found"; exit 1; }
-          
-          # Migration scripts folder required by config.sh + start script
-          test -d ./migration_scripts || { echo "[ERROR] migration_scripts/ folder not found"; exit 1; }
-          test -f ./migration_scripts/index.js || { echo "[ERROR] migration_scripts/index.js not found"; exit 1; }
-          test -f ./migration_scripts/create-env-vars.js || { echo "[ERROR] migration_scripts/create-env-vars.js not found"; exit 1; }
-          test -f ./migration_scripts/create-migration-source.js || { echo "[ERROR] migration_scripts/create-migration-source.js not found"; exit 1; }
-          test -f ./migration_scripts/start-repo-migration.js || { echo "[ERROR] migration_scripts/start-repo-migration.js not found"; exit 1; }
-          test -f ./migration_scripts/gh-api.js || { echo "[ERROR] migration_scripts/gh-api.js not found"; exit 1; }
 
-          # Verify upload scripts are present
-          if [[ "$STORAGE_TYPE" == "GITHUB" ]]; then
-              test -f ./migration_scripts/upload-to-github-blob.sh || {
-                  echo "[ERROR] migration_scripts/upload-to-github-blob.sh not found"
-                  exit 1
-              }
-          fi
-          
-          if [[ "$STORAGE_TYPE" == "AZURE" ]]; then
-              test -f ./migration_scripts/upload-to-azure-blob.sh || {
-                  echo "[ERROR] migration_scripts/upload-to-azure-blob.sh not found"
-                  exit 1
-              }
-          fi
-          
-          if [[ "$STORAGE_TYPE" == "AWS" ]]; then
-              test -f ./migration_scripts/upload-to-aws-blob.sh || {
-                  echo "[ERROR] migration_scripts/upload-to-aws-blob.sh not found"
-                  exit 1
-              }
-          fi
-          
-          echo "[INFO] Scripts are present"
-
-          # Validate Inventory file exists and not empty
-          [[ -z "${INVENTORY_FILE:-}" ]] && echo "[ERROR] INVENTORY_FILE not set" && exit 1
           [[ ! -s "$INVENTORY_FILE" ]] && echo "[ERROR] Inventory file missing or empty" && exit 1
-          printf '\n'
+          echo "[INFO] Validation complete."
 
-# --------------------------------------------------
-# Pre-Migration Readiness + GitSizer Check
-# --------------------------------------------------
+  # ------------------ 2) Pre-Migration Readiness + GitSizer Check ------------------
   pre-migration-readiness-check:
     name: pre-migration-readiness-check
     runs-on: ["${{ inputs.RUNNER_LABEL }}"]
     environment: ${{ inputs.ENVIRONMENT_NAME }}
-  
     env:
       SOURCE_GL_SERVER_URL: ${{ vars.SOURCE_GL_SERVER_URL }}
       GITLAB_USERNAME: ${{ vars.GITLAB_USERNAME }}
-  
       GH_HOST: ${{ vars.GH_HOST }}
-  
-      STORAGE_TYPE: ${{ vars.STORAGE_TYPE }}
-  
-      AZ_CONTAINER: ${{ vars.AZ_CONTAINER }}
-  
-      AWS_BUCKET_NAME: ${{ vars.AWS_BUCKET_NAME }}
-      AWS_REGION: ${{ vars.AWS_REGION }}
-  
       GITLAB_API_PRIVATE_TOKEN: ${{ secrets.GITLAB_API_PRIVATE_TOKEN }}
-  
       GH_PAT: ${{ secrets.GH_PAT }}
       GH_TOKEN: ${{ secrets.GH_PAT }}
-  
-      AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
-  
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-  
       INVENTORY_FILE: ${{ inputs.INVENTORY_FILE }}
-  
       GIT_SIZER_LARGE_FILE_THRESHOLD_BYTES: "419430400"
-  
-    needs:
-      - validate-prerequisites
-  
+    needs: [validate-prerequisites]
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
-  
-      - name: Cache node_modules
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: node_modules/
-          key: ${{ runner.os }}-node_modules-${{ hashFiles('package-lock.json','package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node_modules-
-  
-      - name: Pre-Migration Readiness + GitSizer Check
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Pre-Migration Readiness Check
         shell: bash
         run: |
           echo "======================================="
           echo "# Pre-Migration Readiness Check"
           echo "======================================="
-  
           set -euo pipefail
-  
-          export SOURCE_GL_SERVER_URL="${SOURCE_GL_SERVER_URL:-}"
-          export GITLAB_USERNAME="${GITLAB_USERNAME:-}"
-          export GITLAB_API_PRIVATE_TOKEN="${GITLAB_API_PRIVATE_TOKEN:-}"
-  
-          export GH_PAT="${GH_PAT:-}"
-          export GH_TOKEN="${GH_TOKEN:-}"
-  
-          export GH_HOST="${GH_HOST:-}"
-  
-          export STORAGE_TYPE="${STORAGE_TYPE:-}"
-  
-          export AZ_CONTAINER="${AZ_CONTAINER:-}"
-  
-          export AWS_BUCKET_NAME="${AWS_BUCKET_NAME:-}"
-          export AWS_REGION="${AWS_REGION:-}"
-  
-          export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-}"
-          export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-}"
-  
-          export AZURE_STORAGE_CONNECTION_STRING="${AZURE_STORAGE_CONNECTION_STRING:-}"
-  
-          export INVENTORY_FILE="${INVENTORY_FILE:-}"
-  
-          export GIT_SIZER_LARGE_FILE_THRESHOLD_BYTES="${GIT_SIZER_LARGE_FILE_THRESHOLD_BYTES:-419430400}"
-  
-          chmod +x ./config.sh
-          chmod +x ./gl-migration-readiness-check.sh
-          chmod +x ./gl-gitsizer-readiness-check.sh
-  
-          echo
+
+          chmod +x ./gl-migration-readiness-check.sh ./gl-gitsizer-readiness-check.sh
+
           echo "# 1. Migration Readiness Check"
-          echo "======================================="
-          echo "Running migration readiness checks for open merge requests and active pipelines..."
-          ./gl-migration-readiness-check.sh \
-            > gl-migration-readiness-check.out 2>&1 || {
-              echo "[ERROR] Migration readiness check failed"
-              cat gl-migration-readiness-check.out
-              exit 1
-            }
-  
-          echo
-          echo "# 2. GitSizer Repository Discovery"
-          echo "======================================="
-          echo "Running GitSizer readiness checks for repository size and large file analysis..."
-          ./gl-gitsizer-readiness-check.sh \
-            > gl-gitsizer-readiness-check.out 2>&1 || {
-              echo "[ERROR] GitSizer readiness check failed"
-              cat gl-gitsizer-readiness-check.out
-              exit 1
-            }
-  
-          echo
-          echo "======================================="
-          echo "# Readiness Summary"
-          echo "======================================="
-  
-          echo
-          echo "Migration Readiness Output"
-          echo "--------------------------"
-          tail -50 gl-migration-readiness-check.out || true
-  
-          echo
-          echo "GitSizer Output"
-          echo "--------------------------"
-          tail -50 gl-gitsizer-readiness-check.out || true
-  
-          echo
-          echo "======================================="
-          echo "# Files To Review"
-          echo "======================================="
-  
-          echo
-          echo "Migration Readiness:"
-          echo "  gl-migration-readiness-check.out"
-  
-          echo
-          echo "GitSizer Summary:"
-          echo "  output_files/git-sizer-readiness/final-report.txt"
-  
-          echo
-          echo "Repository Metrics:"
-          echo "  output_files/git-sizer-readiness/repo-metrics.csv"
-  
-          echo
-          echo "Large Files (>400MB):"
-          echo "  output_files/git-sizer-readiness/large-files-above-400mb.csv"
-  
-          echo
-          echo "Per Repository Reports:"
-          echo "  output_files/git-sizer-readiness/per-repo-csv/"
-  
-          echo
-          echo "Per Repository Large Files:"
-          echo "  output_files/git-sizer-readiness/per-repo-large-files/"
-  
-          echo
-          echo "Logs:"
-          echo "  logs/"
-  
+          ./gl-migration-readiness-check.sh > gl-migration-readiness-check.out 2>&1 || {
+            echo "[ERROR] Migration readiness check failed"
+            cat gl-migration-readiness-check.out
+            exit 1
+          }
+
+          echo "# 2. GitSizer Check"
+          ./gl-gitsizer-readiness-check.sh > gl-gitsizer-readiness-check.out 2>&1 || {
+            echo "[ERROR] GitSizer readiness check failed"
+            cat gl-gitsizer-readiness-check.out
+            exit 1
+          }
+
       - name: Upload Readiness Artifacts
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@4bec3508f0fb8442805494d4a84fa9449f05ee46 # v4.6.2
         with:
           name: pre-migration-readiness-check-artifacts
           retention-days: 7
@@ -611,17 +262,9 @@ jobs:
             gl-migration-readiness-check.out
             gl-gitsizer-readiness-check.out
             logs/
-            output_files/git-sizer-readiness/final-report.txt
-            output_files/git-sizer-readiness/repo-size-summary.csv
-            output_files/git-sizer-readiness/repo-metrics.csv
-            output_files/git-sizer-readiness/large-files-above-*mb.csv
-            output_files/git-sizer-readiness/per-repo-csv/
-            output_files/git-sizer-readiness/per-repo-large-files/
-            output_files/git-sizer-readiness/gitsizer-json/
-            output_files/git-sizer-readiness/gitsizer-text/
-          
- 
-  # ------------------ Approve after Readiness Check ------------------
+            output_files/git-sizer-readiness/
+
+  # ------------------ 3) Manual Approval Gate ------------------
   approve-after-readiness-check:
     name: approve-after-readiness-check
     runs-on: ["${{ inputs.RUNNER_LABEL }}"]
@@ -630,311 +273,20 @@ jobs:
       name: approvers-group
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
         with:
           name: pre-migration-readiness-check-artifacts
           path: .
 
-      - name: approve-after-readiness-check
+      - name: Approval Notice
         shell: bash
         run: |
           echo "===================================="
           echo "MANUAL APPROVAL REQUIRED"
           echo "===================================="
-      
-          echo
-          echo "Review readiness results:"
-          echo "  - gl-migration-readiness-check.out"
-      
-          echo
-          echo "Review GitSizer summary:"
-          echo "  - output_files/git-sizer-readiness/final-report.txt"
-      
-          echo
-          echo "Review repository metrics:"
-          echo "  - output_files/git-sizer-readiness/repo-metrics.csv"
-      
-          echo
-          echo "IMPORTANT - Review files above 400 MB:"
-          echo "  - output_files/git-sizer-readiness/large-files-above-400mb.csv"
-      
-          echo
-          echo "Repository-specific reports:"
-          echo "  - output_files/git-sizer-readiness/per-repo-csv/"
-      
-          echo
-          echo "Repository-specific large files:"
-          echo "  - output_files/git-sizer-readiness/per-repo-large-files/"
-      
-          echo
-          echo "Logs:"
-          echo "  - logs/"
-      
-          echo
-          echo "Repos marked as:"
-          echo "  POTENTIAL_MIGRATION_FAILURE_FILE_ABOVE_400MB"
-          echo "must be reviewed before migration."
-      
-          echo
-          echo "Approve only after reviewing all readiness results."
+          echo "Review readiness results and files above threshold before proceeding."
 
-  # # ------------------ 3) Generate Migration Archives ------------------
-  # generate-migration-archives:
-  #   name: generate-migration-archives
-  #   runs-on: ["${{ inputs.RUNNER_LABEL }}"]
-  #   environment: ${{ inputs.ENVIRONMENT_NAME }}
-  #   env:
-  #     SOURCE_GL_SERVER_URL: ${{ vars.SOURCE_GL_SERVER_URL }}
-  #     GITLAB_USERNAME: ${{ vars.GITLAB_USERNAME }}
-  #     GH_HOST: ${{ vars.GH_HOST }}
-  #     STORAGE_TYPE: ${{ vars.STORAGE_TYPE }}
-  #     AZ_CONTAINER: ${{ vars.AZ_CONTAINER }}
-  #     AWS_BUCKET_NAME: ${{ vars.AWS_BUCKET_NAME }}
-  #     AWS_REGION: ${{ vars.AWS_REGION }}
-  #     GITLAB_API_PRIVATE_TOKEN: ${{ secrets.GITLAB_API_PRIVATE_TOKEN }}
-  #     GH_PAT: ${{ secrets.GH_PAT }}
-  #     GH_TOKEN: ${{ secrets.GH_PAT }}
-  #     AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
-  #     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-  #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-  #     GLXREPO_GH_PAT: ${{ secrets.GLXREPO_GH_PAT }}
-  #     GL_EXPORTER_REPO_URL: ${{ vars.GL_EXPORTER_REPO_URL }}
-      
-  #   needs: [approve-after-readiness-check]
-  #   outputs:
-  #     ARCHIVE_LIST_BASENAME: ${{ steps.capture.outputs.ARCHIVE_LIST_BASENAME }}
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
-
-  #     - name: Cache node_modules
-  #       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-  #       with:
-  #         path: node_modules/
-  #         key: ${{ runner.os }}-node_modules-${{ hashFiles('package-lock.json', 'package.json') }}
-  #         restore-keys: |
-  #           ${{ runner.os }}-node_modules-
-
-  #     - name: generate-migration-archives
-  #       shell: bash
-  #       run: |
-  #         echo "================================"
-  #         echo "# 3) Generate Migration Archives"
-  #         echo "================================"
-  #         set -euo pipefail
-
-  #         export SOURCE_GL_SERVER_URL="${SOURCE_GL_SERVER_URL:-}"
-  #         export GITLAB_USERNAME="${GITLAB_USERNAME:-}"
-  #         export GITLAB_API_PRIVATE_TOKEN="${GITLAB_API_PRIVATE_TOKEN:-}"
-  #         export INVENTORY_FILE="${INVENTORY_FILE:-}"
-  #         export GH_PAT="${GH_PAT:-}"
-  #         export GH_TOKEN="${GH_TOKEN:-}"
-  #         export GITHUB_TYPE="${GITHUB_TYPE:-}"
-  #         export GH_HOST="${GH_HOST:-}"
-  #         export STORAGE_TYPE="${STORAGE_TYPE:-}"
-  #         export GLXREPO_GH_PAT="${GLXREPO_GH_PAT:-}"
-  #         export GL_EXPORTER_REPO_URL="${GL_EXPORTER_REPO_URL:-}"
-
-  #         # Build gl-exporter image
-  #         printf '\n'
-  #         echo "[INFO] Building gl-exporter Docker image if not present..."
-
-  #         if ! docker image inspect gl-exporter >/dev/null 2>&1; then
-  #           echo "[INFO] gl-exporter image not found. Building now..."
-  #           mkdir -p gl_exporter
-  #           git clone "https://x-access-token:${GLXREPO_GH_PAT}@${GL_EXPORTER_REPO_URL}" gl_exporter
-  #           pushd "gl_exporter" >/dev/null
-  #           sudo docker build --no-cache=true -t "gl-exporter" .
-  #           popd >/dev/null
-            
-  #           echo "[INFO] Verifying gl-exporter image..."
-
-  #           docker image inspect gl-exporter >/dev/null 2>&1 || {
-  #             echo "[ERROR] gl-exporter build failed"
-  #             exit 1
-  #           }
-  #         else
-  #           echo "[INFO] gl-exporter image already exists"
-  #         fi
-
-  #         # Docker image details
-  #         echo "Docker image details"
-  #         docker images | grep "gl-exporter"
-
-  #         chmod +x ./generate-gl-migration-archive.sh ./config.sh
-  #         [[ -x "./generate-gl-migration-archive.sh" ]] || { echo "[ERROR] generate-gl-migration-archive.sh not executable"; exit 1; }
-
-  #         echo "[INFO] Generating migration archives..."
-  #         ./generate-gl-migration-archive.sh > generate-gl-migration-archive.out 2>&1 || {
-  #           echo "[ERROR] Migration archive generation failed"; cat generate-gl-migration-archive.out; exit 1;
-  #         }
-
-  #         printf '\n'
-  #         echo "Output of generate-gl-migration-archive.sh"
-  #         echo "-----------------------------------------"
-  #         cat generate-gl-migration-archive.out
-  #         printf '\n'
-
-  #         ARCHIVE_EXPORT="$(grep -E '^export[[:space:]]+ARCHIVE_LIST=' generate-gl-migration-archive.out || true)"
-  #         [[ -n "$ARCHIVE_EXPORT" ]] || { echo "[ERROR] ARCHIVE_LIST export line not found"; exit 1; }
-
-  #         ARCHIVE_LIST="${ARCHIVE_EXPORT#export ARCHIVE_LIST=}"
-  #         [[ -n "${ARCHIVE_LIST:-}" ]] || { echo "[ERROR] ARCHIVE_LIST empty"; exit 1; }
-
-  #         echo "ARCHIVE_LIST=$ARCHIVE_LIST" > generate-migration-archive-output-var.env
-
-  #     - name: capture
-  #       id: capture
-  #       shell: bash
-  #       run: |
-  #         set -euo pipefail
-  #         ARCHIVE_LIST="$(grep -E '^ARCHIVE_LIST=' generate-migration-archive-output-var.env | head -n1 | cut -d= -f2-)"
-  #         ARCHIVE_LIST_BASENAME="$(basename "$ARCHIVE_LIST")"
-  #         echo "ARCHIVE_LIST_BASENAME=$ARCHIVE_LIST_BASENAME" >> "$GITHUB_OUTPUT"
-
-  #     - name: Upload artifacts
-  #       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-  #       with:
-  #         name: generate-migration-archives-artifacts
-  #         retention-days: 7
-  #         path: |
-  #           generate-gl-migration-archive.out
-  #           generate-migration-archive-output-var.env
-  #           gitlab_migration_archives/
-  #           output_files/
-  #           logs/
-
-  # # ------------------ 4) Upload Migration Archives ------------------
-  # upload-migration-archives:
-  #   name: upload-migration-archives
-  #   runs-on: ["${{ inputs.RUNNER_LABEL }}"]
-  #   environment: ${{ inputs.ENVIRONMENT_NAME }}
-  #   env:
-  #     SOURCE_GL_SERVER_URL: ${{ vars.SOURCE_GL_SERVER_URL }}
-  #     GITLAB_USERNAME: ${{ vars.GITLAB_USERNAME }}
-  #     GH_HOST: ${{ vars.GH_HOST }}
-  #     STORAGE_TYPE: ${{ vars.STORAGE_TYPE }}
-  #     AZ_CONTAINER: ${{ vars.AZ_CONTAINER }}
-  #     AWS_BUCKET_NAME: ${{ vars.AWS_BUCKET_NAME }}
-  #     AWS_REGION: ${{ vars.AWS_REGION }}
-  #     GITLAB_API_PRIVATE_TOKEN: ${{ secrets.GITLAB_API_PRIVATE_TOKEN }}
-  #     GH_PAT: ${{ secrets.GH_PAT }}
-  #     GH_TOKEN: ${{ secrets.GH_PAT }}
-  #     AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
-  #     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-  #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-  #   needs: [generate-migration-archives]
-  #   outputs:
-  #     UPLOADED_ARCHIVES_BASENAME: ${{ steps.capture.outputs.UPLOADED_ARCHIVES_BASENAME }}
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
-
-  #     - name: Download artifacts
-  #       uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-  #       with:
-  #         name: generate-migration-archives-artifacts
-  #         path: .
-
-  #     - name: Cache node_modules
-  #       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-  #       with:
-  #         path: node_modules/
-  #         key: ${{ runner.os }}-node_modules-${{ hashFiles('package-lock.json', 'package.json') }}
-  #         restore-keys: |
-  #           ${{ runner.os }}-node_modules-
-
-  #     - name: upload-migration-archives
-  #       shell: bash
-  #       env:
-  #         ARCHIVE_LIST: ${{ needs.generate-migration-archives.outputs.ARCHIVE_LIST_BASENAME }}
-  #       run: |
-  #         echo "=============================="
-  #         echo "# 4) Upload Migration Archives"
-  #         echo "=============================="
-  #         set -euo pipefail
-
-  #         export SOURCE_GL_SERVER_URL="${SOURCE_GL_SERVER_URL:-}"
-  #         export GITLAB_USERNAME="${GITLAB_USERNAME:-}"
-  #         export GITLAB_API_PRIVATE_TOKEN="${GITLAB_API_PRIVATE_TOKEN:-}"
-  #         export INVENTORY_FILE="${INVENTORY_FILE:-}"
-  #         export GH_PAT="${GH_PAT:-}"
-  #         export GH_TOKEN="${GH_TOKEN:-}"
-  #         export GITHUB_TYPE="${GITHUB_TYPE:-}"
-  #         export GH_HOST="${GH_HOST:-}"
-  #         export STORAGE_TYPE="${STORAGE_TYPE:-}"
-
-  #         # If storage type is selected as Azure or AWS, set required env
-  #         export AZ_CONTAINER="${AZ_CONTAINER:-}"
-  #         export AZURE_STORAGE_CONNECTION_STRING="${AZURE_STORAGE_CONNECTION_STRING:-}"
-  #         export AWS_BUCKET_NAME="${AWS_BUCKET_NAME:-}"
-  #         export AWS_REGION="${AWS_REGION:-}"
-  #         export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-}"
-  #         export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-}"
-
-  #         chmod +x ./upload-gl-migration-archive.sh ./config.sh
-          
-  #         # Verify upload scripts are present
-  #         if [[ "$STORAGE_TYPE" == "GITHUB" ]]; then
-  #             chmod +x migration_scripts/upload-to-github-blob.sh
-  #         fi
-          
-  #         if [[ "$STORAGE_TYPE" == "AZURE" ]]; then
-  #             chmod +x migration_scripts/upload-to-azure-blob.sh
-  #         fi
-          
-  #         if [[ "$STORAGE_TYPE" == "AWS" ]]; then
-  #             chmod +x migration_scripts/upload-to-aws-blob.sh
-  #         fi
-          
-  #         [[ -x "./upload-gl-migration-archive.sh" ]] || { echo "[ERROR] upload-gl-migration-archive.sh not executable"; exit 1; }
-
-  #         ARCHIVE_LIST="$(basename "$ARCHIVE_LIST")"
-  #         export ARCHIVE_LIST="$CI_PROJECT_DIR/output_files/$ARCHIVE_LIST"
-  #         echo "Rewritten ARCHIVE_LIST = $ARCHIVE_LIST"
-  #         test -f "$ARCHIVE_LIST" || { echo "[ERROR] Archive list not found: $ARCHIVE_LIST"; exit 1; }
-
-  #         printf '\n'
-  #         echo "[INFO] Uploading migration archives..."
-  #         ./upload-gl-migration-archive.sh > upload-gl-migration-archive.out 2>&1 || {
-  #           echo "[ERROR] Migration archive upload failed"; cat upload-gl-migration-archive.out; exit 1;
-  #         }
-
-  #         printf '\n'
-  #         echo "Output of upload-gl-migration-archive.sh"
-  #         echo "---------------------------------------"
-  #         cat upload-gl-migration-archive.out
-  #         printf '\n'
-
-  #         UPLOAD_EXPORT="$(grep -E '^export[[:space:]]+UPLOADED_ARCHIVES=' upload-gl-migration-archive.out || true)"
-  #         [[ -n "$UPLOAD_EXPORT" ]] || { echo "[ERROR] UPLOADED_ARCHIVES export line not found"; exit 1; }
-
-  #         UPLOADED_ARCHIVES="${UPLOAD_EXPORT#export UPLOADED_ARCHIVES=}"
-  #         [[ -n "${UPLOADED_ARCHIVES:-}" ]] || { echo "[ERROR] UPLOADED_ARCHIVES empty"; exit 1; }
-
-  #         echo "UPLOADED_ARCHIVES=$UPLOADED_ARCHIVES" > upload-migration-archive-output-var.env
-
-  #     - name: capture
-  #       id: capture
-  #       shell: bash
-  #       run: |
-  #         set -euo pipefail
-  #         UPLOADED_ARCHIVES="$(grep -E '^UPLOADED_ARCHIVES=' upload-migration-archive-output-var.env | head -n1 | cut -d= -f2-)"
-  #         UPLOADED_ARCHIVES_BASENAME="$(basename "$UPLOADED_ARCHIVES")"
-  #         echo "UPLOADED_ARCHIVES_BASENAME=$UPLOADED_ARCHIVES_BASENAME" >> "$GITHUB_OUTPUT"
-
-  #     - name: Upload artifacts
-  #       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-  #       with:
-  #         name: upload-migration-archives-artifacts
-  #         retention-days: 7
-  #         path: |
-  #           upload-gl-migration-archive.out
-  #           upload-migration-archive-output-var.env
-  #           output_files/
-  #           logs/
-
-  # ------------------ 5) Start Repository Migration ------------------
+  # ------------------ 4) Start Repository Migration ------------------
   start-repository-migration:
     name: start-repository-migration
     runs-on: ["${{ inputs.RUNNER_LABEL }}"]
@@ -943,92 +295,41 @@ jobs:
       SOURCE_GL_SERVER_URL: ${{ vars.SOURCE_GL_SERVER_URL }}
       GITLAB_USERNAME: ${{ vars.GITLAB_USERNAME }}
       GH_HOST: ${{ vars.GH_HOST }}
-      STORAGE_TYPE: ${{ vars.STORAGE_TYPE }}
-      AZ_CONTAINER: ${{ vars.AZ_CONTAINER }}
-      AWS_BUCKET_NAME: ${{ vars.AWS_BUCKET_NAME }}
-      AWS_REGION: ${{ vars.AWS_REGION }}
+      TARGET_API_URL: ${{ vars.TARGET_API_URL }}
+      TARGET_UPLOADS_URL: ${{ vars.TARGET_UPLOADS_URL }}
       GITLAB_API_PRIVATE_TOKEN: ${{ secrets.GITLAB_API_PRIVATE_TOKEN }}
       GH_PAT: ${{ secrets.GH_PAT }}
       GH_TOKEN: ${{ secrets.GH_PAT }}
-      AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      TARGET_API_URL: ${{ secrets.TARGET_API_URL }}
-      TARGET_UPLOADS_URL: ${{ secrets.TARGET_UPLOADS_URL }}
     needs: [approve-after-readiness-check]
     outputs:
-     MIGRATION_OUTPUT_FILE_BASENAME: ${{ steps.capture.outputs.MIGRATION_OUTPUT_FILE_BASENAME }}
+      MIGRATION_OUTPUT_FILE_BASENAME: ${{ steps.capture.outputs.MIGRATION_OUTPUT_FILE_BASENAME }}
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
-
-      # - name: Download artifacts
-      #   uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-      #   with:
-      #     name: upload-migration-archives-artifacts
-      #     path: .
-
-      - name: Cache node_modules
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: node_modules/
-          key: ${{ runner.os }}-node_modules-${{ hashFiles('package-lock.json', 'package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node_modules-
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: start-repository-migration
         shell: bash
         run: |
           echo "====================="
-          echo "# 5) Start Migrations"
+          echo "# Direct gl2gh Migrations"
           echo "====================="
           set -euo pipefail
 
-          export SOURCE_GL_SERVER_URL="${SOURCE_GL_SERVER_URL:-}"
-          export GITLAB_USERNAME="${GITLAB_USERNAME:-}"
-          export GITLAB_API_PRIVATE_TOKEN="${GITLAB_API_PRIVATE_TOKEN:-}"
-          export INVENTORY_FILE="${INVENTORY_FILE:-}"
-          export GH_PAT="${GH_PAT:-}"
-          export GH_TOKEN="${GH_TOKEN:-}"
-          export GITHUB_TYPE="${GITHUB_TYPE:-}"
-          export GH_HOST="${GH_HOST:-}"
-          export STORAGE_TYPE="${STORAGE_TYPE:-}"
-          export TARGET_API_URL="${TARGET_API_URL:-}"
-          export TARGET_UPLOADS_URL="${TARGET_UPLOADS_URL:-}"
-
-          # If storage type is selected as Azure or AWS, set required env
-          export AZ_CONTAINER="${AZ_CONTAINER:-}"
-          export AZURE_STORAGE_CONNECTION_STRING="${AZURE_STORAGE_CONNECTION_STRING:-}"
-          export AWS_BUCKET_NAME="${AWS_BUCKET_NAME:-}"
-          export AWS_REGION="${AWS_REGION:-}"
-          export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-}"
-          export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-}"
-
-          chmod +x ./start-gl2gh-repo-migration.sh ./runner.sh ./config.sh
-          [[ -x "./start-gl2gh-repo-migration.sh" ]] || { echo "[ERROR] start-gl2gh-repo-migration.sh not executable"; exit 1; }
-
-          # UPLOADED_ARCHIVES="$(basename "$UPLOADED_ARCHIVES")"
-          # export UPLOADED_ARCHIVES="$CI_PROJECT_DIR/output_files/$UPLOADED_ARCHIVES"
-          # echo "Rewritten UPLOADED_ARCHIVES = $UPLOADED_ARCHIVES"
-          # test -f "$UPLOADED_ARCHIVES" || { echo "[ERROR] Uploaded archives CSV not found: $UPLOADED_ARCHIVES"; exit 1; }
-
-          echo "[INFO] Initiating GitLab-to-GitHub repository migrations..."
+          chmod +x ./start-gl2gh-repo-migration.sh
+          
+          echo "[INFO] Initiating direct GitLab-to-GitHub repository migrations..."
           ./start-gl2gh-repo-migration.sh > start-gl2gh-repo-migration.out 2>&1 || {
-            echo "[ERROR] Migration initiation failed"; cat start-gl2gh-repo-migration.out; exit 1;
+            echo "[ERROR] Migration initiation failed"
+            cat start-gl2gh-repo-migration.out
+            exit 1
           }
 
-          printf '\n'
-          echo "Output of start-gl2gh-repo-migration.sh"
-          echo "--------------------------------------"
           cat start-gl2gh-repo-migration.out
-          printf '\n'
-          
+
           MIGRATION_EXPORT="$(grep -E '^export[[:space:]]+MIGRATION_OUTPUT_FILE=' start-gl2gh-repo-migration.out || true)"
           [[ -n "$MIGRATION_EXPORT" ]] || { echo "[ERROR] MIGRATION_OUTPUT_FILE export line not found"; exit 1; }
 
           MIGRATION_OUTPUT_FILE="${MIGRATION_EXPORT#export MIGRATION_OUTPUT_FILE=}"
-          [[ -n "${MIGRATION_OUTPUT_FILE:-}" ]] || { echo "[ERROR] MIGRATION_OUTPUT_FILE empty"; exit 1; }
-
           echo "MIGRATION_OUTPUT_FILE=$MIGRATION_OUTPUT_FILE" > start-repository-migration-output-var.env
 
       - name: capture
@@ -1037,11 +338,10 @@ jobs:
         run: |
           set -euo pipefail
           MIGRATION_OUTPUT_FILE="$(grep -E '^MIGRATION_OUTPUT_FILE=' start-repository-migration-output-var.env | head -n1 | cut -d= -f2-)"
-          MIGRATION_OUTPUT_FILE_BASENAME="$(basename "$MIGRATION_OUTPUT_FILE")"
-          echo "MIGRATION_OUTPUT_FILE_BASENAME=$MIGRATION_OUTPUT_FILE_BASENAME" >> "$GITHUB_OUTPUT"
-          
+          echo "MIGRATION_OUTPUT_FILE_BASENAME=$(basename "$MIGRATION_OUTPUT_FILE")" >> "$GITHUB_OUTPUT"
+
       - name: Upload artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@4bec3508f0fb8442805494d4a84fa9449f05ee46 # v4.6.2
         with:
           name: start-repository-migration-artifacts
           retention-days: 7
@@ -1051,50 +351,24 @@ jobs:
             output_files/
             logs/
 
-  # ------------------ 6) Display migration Summary ------------------
+  # ------------------ 5) Display Migration Summary ------------------
   display-migration-summary:
     name: display-migration-summary
     runs-on: ["${{ inputs.RUNNER_LABEL }}"]
     environment: ${{ inputs.ENVIRONMENT_NAME }}
-    env:
-      SOURCE_GL_SERVER_URL: ${{ vars.SOURCE_GL_SERVER_URL }}
-      GITLAB_USERNAME: ${{ vars.GITLAB_USERNAME }}
-      GH_HOST: ${{ vars.GH_HOST }}
-      STORAGE_TYPE: ${{ vars.STORAGE_TYPE }}
-      AZ_CONTAINER: ${{ vars.AZ_CONTAINER }}
-      AWS_BUCKET_NAME: ${{ vars.AWS_BUCKET_NAME }}
-      AWS_REGION: ${{ vars.AWS_REGION }}
-      GITLAB_API_PRIVATE_TOKEN: ${{ secrets.GITLAB_API_PRIVATE_TOKEN }}
-      GH_PAT: ${{ secrets.GH_PAT }}
-      GH_TOKEN: ${{ secrets.GH_PAT }}
-      AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
     needs: [start-repository-migration]
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Download pre-migration artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - name: Download readiness artifacts
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
         with:
           name: pre-migration-readiness-check-artifacts
           path: .
 
-      - name: Download generate artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: generate-migration-archives-artifacts
-          path: .
-
-      - name: Download upload artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: upload-migration-archives-artifacts
-          path: .
-
-      - name: Download start artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - name: Download migration artifacts
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
         with:
           name: start-repository-migration-artifacts
           path: .
@@ -1105,229 +379,56 @@ jobs:
           SUMMARY_FILE="final-migration-summary.txt"
 
           {
-          echo "==============================================="
-          echo "# 6) Extracting the Success and Failure metrics"
-          echo "==============================================="
-          set -euo pipefail
+            echo "==============================================="
+            echo "# Migration Metrics Summary"
+            echo "==============================================="
+            set -euo pipefail
 
-          GEN_OUT="generate-gl-migration-archive.out"
-          UP_OUT="upload-gl-migration-archive.out"
-          START_OUT="start-gl2gh-repo-migration.out"
+            START_OUT="start-gl2gh-repo-migration.out"
 
-          get_last_num_for_key() {
-            local file="$1" key="$2"
-            awk -v k="$key" '
-              BEGIN { v=0 }
-              $0 ~ k {
-                for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+$/) v=$i
-              }
-              END { print v+0 }
-            ' "$file" 2>/dev/null || echo 0
-          }
+            get_last_num_for_key() {
+              local file="$1" key="$2"
+              awk -v k="$key" '
+                BEGIN { v=0 }
+                $0 ~ k {
+                  for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+$/) v=$i
+                }
+                END { print v+0 }
+              ' "$file" 2>/dev/null || echo 0
+            }
 
-          gen_total=$(get_last_num_for_key "$GEN_OUT" "Total")
-          gen_succ=$(get_last_num_for_key "$GEN_OUT" "Success")
-          gen_fail=$(get_last_num_for_key "$GEN_OUT" "Failed")
+            start_total=$(get_last_num_for_key "$START_OUT" "Total")
+            start_started=$(get_last_num_for_key "$START_OUT" "started")
+            start_fail=$(get_last_num_for_key "$START_OUT" "Failed")
 
-          up_total=$(get_last_num_for_key "$UP_OUT" "Total")
-          up_succ=$(get_last_num_for_key "$UP_OUT" "Success")
-          up_fail=$(get_last_num_for_key "$UP_OUT" "Failed")
+            echo "MIGRATION SUMMARY"
+            echo "-----------------"
+            printf "Start repository migrations : total=%s, started=%s, failed=%s\n" "$start_total" "$start_started" "$start_fail"
 
-          start_total=$(get_last_num_for_key "$START_OUT" "Total")
-          start_started=$(get_last_num_for_key "$START_OUT" "started")
-          start_fail=$(get_last_num_for_key "$START_OUT" "Failed")
+            if [ "$start_started" -eq 0 ]; then
+              echo "[ERROR] No migrations were started. Review output_files/migration-failures_*.csv and logs."
+              exit 1
+            fi
 
-          printf '\n'
-          echo "MIGRATION SUMMARY"
-          echo "-------------"
-          printf "Readiness check            : See gl-migration-readiness-check.out\n"
-          printf "Generate migration archives : total=%s, success=%s, failed=%s\n" "$gen_total" "$gen_succ" "$gen_fail"
-          printf "Upload migration archives   : total=%s, success=%s, failed=%s\n" "$up_total" "$up_succ"  "$up_fail"
-          printf "Start repository migrations : total=%s, started=%s, failed=%s\n" "$start_total" "$start_started" "$start_fail"
-
-          total_fail=$(( gen_fail + up_fail + start_fail ))
-
-          printf '\n'
-          echo "FAILURES"
-          echo "--------"
-
-          if [ "$total_fail" -gt 0 ]; then
-            printf "Failures detected. Total failed = %s\n" "$total_fail"
-            printf "Failures in generating migration archives = %s\n" "$gen_fail"
-            printf "Failures in uploading migration archives = %s\n" "$up_fail"
-            printf "Failures in repository migration = %s\n" "$start_fail"
-            printf "Check logs/*.log and output_files/*failures*.csv\n"
-          fi
-
-          if [ "$start_started" -eq 0 ]; then
-            echo "--------------------------No migration was started.--------------------------"
-            printf "Start repository migrations: total=%s, started=%s, failed=%s\n" "$start_total" "$start_started" "$start_fail"
-            printf '\n'
-            echo "Listing failures if any.."
-            printf "Failures in generating migration archives = %s\n" "$gen_fail"
-            printf "Failures in uploading migration archives = %s\n" "$up_fail"
-            printf "Failures in repository migration = %s\n" "$start_fail"
-            printf "Check logs/*.log and output_files/*failures*.csv\n"
-            echo "No migrations started"
-            exit 1
-          fi
-
-          if [ "$start_started" -gt 0 ]; then
-            echo "Total Number of Migrations Started: $start_started"
-          fi
-          
-          printf '\n'
-          echo "--------------------------------------------------------------------------------------"
-          echo "Pipeline execution completed. Review the summary and artifacts for details."
-          echo "Migration IDs for initiated migrations are available in start-gl2gh-repo-migration.out"
-          echo "--------------------------------------------------------------------------------------"
-
-          printf '\n'
-          echo "============================================================"
-          echo "# To Monitor status of migration for GitHub Enterprise Cloud"
-          echo "============================================================"
-          echo "Monitor migration progress manually using"
-          echo "gh migration-monitor --organization <GH_ORG> --github-token <GH_PAT>"
-          echo "OR"
-          echo "gh ado2gh wait-for-migration --migration-id <migration-id>"
-
-          printf '\n'
-          echo "================================================================================"
-          echo "# To Monitor status of migration for GitHub Enterprise Cloud with Data Residency"
-          echo "================================================================================"
-          echo "Monitor migration progress manually using:"
-          echo "gh ado2gh wait-for-migration --migration-id <migration-id> --target-api-url https://api.SUBDOMAIN.ghe.com"
-          printf '\n'
-
+            echo "============================================================"
+            echo "# To Monitor Status (Optional / On-Demand)"
+            echo "============================================================"
+            echo "Run locally or via terminal:"
+            echo "gh gei wait-for-migration --migration-id <ID> --github-target-pt $GH_PAT"
           } | tee "$SUMMARY_FILE"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@4bec3508f0fb8442805494d4a84fa9449f05ee46 # v4.6.2
         with:
           name: display-migration-summary-artifacts
           retention-days: 7
           path: |
-            gl-migration-readiness-check.out
-            generate-gl-migration-archive.out
-            upload-gl-migration-archive.out
             start-gl2gh-repo-migration.out
             final-migration-summary.txt
             output_files/
             logs/
 
-
-  # # ------------------ Approve before Monitoring ------------------
-  # approve-before-monitoring:
-  #   name: approve-before-monitoring
-  #   runs-on: ["${{ inputs.RUNNER_LABEL }}"]
-  #   needs: [display-migration-summary]
-  #   environment:
-  #     name: approvers-group   # ✅ MUST configure in GitHub UI
-  #   steps:
-  #     - name: Download artifacts
-  #       uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-  #       with:
-  #         name: start-repository-migration-artifacts
-  #         path: .
-  
-  #     - name: Approval Step
-  #       shell: bash
-  #       run: |
-  #         echo "===================================="
-  #         echo "MANUAL APPROVAL REQUIRED"
-  #         echo "===================================="
-  #         echo
-  #         echo "Review before monitoring:"
-  #         echo " - start-gl2gh-repo-migration.out"
-  #         echo " - output_files/migration-outputs_*.csv"
-  #         echo
-  #         echo "Click 'Review deployments' → Approve to continue."
-          
-  # # ------------------ 7) Monitor Repository Migrations ------------------
-  # monitor-repository-migrations:
-  #   name: monitor-repository-migrations
-  #   runs-on: ["${{ inputs.RUNNER_LABEL }}"]
-  #   environment: ${{ inputs.ENVIRONMENT_NAME }}
-  #   env:
-  #     SOURCE_GL_SERVER_URL: ${{ vars.SOURCE_GL_SERVER_URL }}
-  #     GITLAB_USERNAME: ${{ vars.GITLAB_USERNAME }}
-  #     GH_HOST: ${{ vars.GH_HOST }}
-  #     STORAGE_TYPE: ${{ vars.STORAGE_TYPE }}
-  #     AZ_CONTAINER: ${{ vars.AZ_CONTAINER }}
-  #     AWS_BUCKET_NAME: ${{ vars.AWS_BUCKET_NAME }}
-  #     AWS_REGION: ${{ vars.AWS_REGION }}
-  #     GITLAB_API_PRIVATE_TOKEN: ${{ secrets.GITLAB_API_PRIVATE_TOKEN }}
-  #     GH_PAT: ${{ secrets.GH_PAT }}
-  #     GH_TOKEN: ${{ secrets.GH_PAT }}
-  #     AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
-  #     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-  #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-  #   needs: [start-repository-migration,approve-before-monitoring]
-    
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
-  
-  #     - name: Download artifacts
-  #       uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-  #       with:
-  #         name: start-repository-migration-artifacts
-  #         path: .
-  
-  #     # ✅ Install GH CLI extension
-  #     - name: Install gh-ado2gh extension
-  #       shell: bash
-  #       run: |
-  #         set -euo pipefail
-  #         unset GH_TOKEN
-  #         echo "$GH_PAT" | gh auth login --with-token --hostname "$GH_HOST"
-  #         gh auth status
-  #         gh extension install https://github.com/github/gh-ado2gh || \
-  #         gh extension upgrade gh-ado2gh
-  #         gh extension list
-  
-  #     # ✅ Run your script
-  #     - name: Run Monitoring Script
-  #       shell: bash
-  #       env:
-  #         MIGRATION_OUTPUT_FILE: ${{ needs.start-repository-migration.outputs.MIGRATION_OUTPUT_FILE_BASENAME }}
-  #       run: |
-  #         set -euo pipefail
-
-  #         # ✅ Identify correct CSV
-  #         MIGRATION_OUTPUT_FILE="$(basename "$MIGRATION_OUTPUT_FILE")"
-  #         export MIGRATION_OUTPUT_FILE="$CI_PROJECT_DIR/output_files/$MIGRATION_OUTPUT_FILE"
-
-  #         test -f "$MIGRATION_OUTPUT_FILE" || {
-  #           echo "[ERROR] Migration output file not found: $MIGRATION_OUTPUT_FILE"
-  #           exit 1
-  #         }
-  
-  #         echo "[INFO] MIGRATION_OUTPUT_FILE: $MIGRATION_OUTPUT_FILE"
-  
-  #         chmod +x ./gl2gh-monitor-migration-status.sh
-  #         ./gl2gh-monitor-migration-status.sh
-
-  #     - name: Publish Monitor Summary to Dashboard
-  #       if: always()
-  #       shell: bash
-  #       run: |
-  #         if [ -f output_files/migration-status-*.csv ]; then
-  #           echo "### Migration Monitoring Summary" >> $GITHUB_STEP_SUMMARY
-  #           echo "Artifact summaries successfully generated." >> $GITHUB_STEP_SUMMARY
-  #         fi
-          
-  #     - name: Upload artifacts
-  #       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-  #       with:
-  #         name: monitor-repository-migrations-artifacts
-  #         retention-days: 7
-  #         path: |
-  #           gl2gh-monitor-migration-status.out
-  #           output_files/
-  #           logs/
-            
-# ------------------ 8) Post-Migration-Validation ------------------
+  # ------------------ 6) Post-Migration Validation ------------------
   post-migration-validation:
     name: post-migration-validation
     runs-on: ["${{ inputs.RUNNER_LABEL }}"]
@@ -1338,39 +439,26 @@ jobs:
       GH_TOKEN: ${{ secrets.GH_PAT }}
       SOURCE_GL_SERVER_URL: ${{ vars.SOURCE_GL_SERVER_URL }}
       GITLAB_USERNAME: ${{ vars.GITLAB_USERNAME }}
-      STORAGE_TYPE: ${{ vars.STORAGE_TYPE }}
-      AZ_CONTAINER: ${{ vars.AZ_CONTAINER }}
-      AWS_BUCKET_NAME: ${{ vars.AWS_BUCKET_NAME }}
-      AWS_REGION: ${{ vars.AWS_REGION }}
       GITLAB_API_PRIVATE_TOKEN: ${{ secrets.GITLAB_API_PRIVATE_TOKEN }}
       GH_PAT: ${{ secrets.GH_PAT }}
-      AZURE_STORAGE_CONNECTION_STRING: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
     needs: [display-migration-summary]
-    
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Run Post Validation Script
         shell: bash
         run: |
           set -euo pipefail
-          export INVENTORY_FILE="${INVENTORY_FILE:-}"
-          export GH_HOST="${GH_HOST:-}"
-          export GH_TOKEN="${GH_PAT:-}"
-          export SOURCE_GL_SERVER_URL="${SOURCE_GL_SERVER_URL:-}"
-          export GITLAB_API_PRIVATE_TOKEN="${GITLAB_API_PRIVATE_TOKEN:-}"
           chmod +x ./gl-post-migration-validation.sh
           ./gl-post-migration-validation.sh
-          
+
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@4bec3508f0fb8442805494d4a84fa9449f05ee46 # v4.6.2
         with:
           name: post-migration-validation-artifacts
           retention-days: 7
           path: |
-            output_files/post-migration-validation/
-            logs/post-migration-validation-*
+            output_files/
+            logs/
