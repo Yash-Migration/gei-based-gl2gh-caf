@@ -304,25 +304,20 @@ jobs:
         shell: bash
         run: |
           echo "====================="
-          echo "# Direct gl2gh Migrations"
+          echo "# gl2gh Migrations"
           echo "====================="
           set -euo pipefail
 
           # Authenticate GH CLI
-          unset GH_TOKEN
           echo "$GH_PAT" | gh auth login --with-token --hostname "$GH_HOST"
 
-          # 1. Install/Upgrade the gh-gl2gh extension
-          echo "[INFO] Installing gh-gl2gh extension..."
+          # Install/Upgrade the gh-gl2gh extension (this handles binary download automatically)
+          echo "[INFO] Installing/upgrading gh-gl2gh extension..."
           gh extension install https://github.com/github/gh-gl2gh \
             || gh extension upgrade gh-gl2gh \
             || true
 
-          # 2. Install the gl2gh underlying binary tool
-          echo "[INFO] Installing gl2gh tool binary..."
-          gh gl2gh install || true
-
-          # 3. Create log directories
+          # Create log directories
           mkdir -p logs output_files logs/gl2gh-verbose-logs
 
           chmod +x ./start-gl2gh-repo-migration.sh
@@ -355,6 +350,7 @@ jobs:
             start-repository-migration-output-var.env
             output_files/
             logs/**
+            *.log
 
   # ------------------ 5) Display Migration Summary ------------------
   display-migration-summary:
