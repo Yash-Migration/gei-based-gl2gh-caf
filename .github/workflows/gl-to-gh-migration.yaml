@@ -308,15 +308,28 @@ jobs:
           echo "====================="
           set -euo pipefail
 
-          # Authenticate GH CLI
+          # Authenticate and Install Extensions
+          echo "[INFO] Installing GitHub CLI extensions..."
+          [[ -n ${GH_PAT:-} ]] || { echo "[ERROR] GH_PAT is required"; exit 1; }
+          [[ -n ${GH_HOST:-} ]] || { echo "[ERROR] GH_HOST is required"; exit 1; }
+
           unset GH_TOKEN
           echo "$GH_PAT" | gh auth login --with-token --hostname "$GH_HOST"
 
-          # Install/Upgrade the gh-gl2gh extension (this handles binary download automatically)
-          echo "[INFO] Installing/upgrading gh-gl2gh extension..."
+          gh auth status --hostname "$GH_HOST"
+
           gh extension install https://github.com/github/gh-gl2gh \
-            || gh extension upgrade gh-gl2gh \
+            || gh extension upgrade https://github.com/github/gh-gl2gh \
             || true
+
+          gh extension install mona-actions/gh-gitlab-stats || gh extension upgrade gh-gitlab-stats || true
+
+          # Install gh-gl2gh extension dependency binary
+          echo "[INFO] Installing gl2gh tool binary..."
+          gh gl2gh install || true
+
+          echo "[INFO] Installed Extensions:"
+          gh extension list
 
           # Create log directories
           mkdir -p logs output_files logs/gl2gh-verbose-logs
