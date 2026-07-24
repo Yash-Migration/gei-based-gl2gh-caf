@@ -5,42 +5,6 @@ set -euo pipefail
 # ============================================================
 # GitLab to GitHub Migration using gh gl2gh migrate-repo
 # ============================================================
-#
-# This script is intended to replace the old:
-#   generate archive -> upload archive -> start migration
-#
-# with a direct:
-#   gh gl2gh migrate-repo
-#
-# Mandatory environment variables:
-#   SOURCE_GL_SERVER_URL
-#   TARGET_API_URL
-#   TARGET_UPLOADS_URL
-#   GITLAB_API_PRIVATE_TOKEN
-#   GH_PAT
-#   INVENTORY_FILE
-#
-# Expected inventory columns:
-#   Namespace / namespace / gitlab_group / gitlab_namespace / group
-#   Project / project / gitlab_project / project_name / name
-#   github_org / gh_org / target_org / organization / org
-#   github_repo / gh_repo / target_repo / repository / repo
-#   gh_repo_visibility / visibility / target_repo_visibility
-#
-# Optional inventory columns:
-#   include_in_export    -> maps to --gitlab-only
-#   exclude_from_export  -> maps to --gitlab-except
-#
-# Output:
-#   output_files/migration-outputs_<timestamp>.csv
-#   output_files/migration-failures_<timestamp>.csv
-#   logs/
-#   logs/gl2gh-verbose-logs/
-#
-# Prints:
-#   export MIGRATION_OUTPUT_FILE=<path>
-#
-# ============================================================
 
 timestamp="$(date -u +%Y%m%d_%H%M%S)"
 
@@ -48,6 +12,7 @@ ROOT_DIR="${CI_PROJECT_DIR:-$(pwd)}"
 OUTPUT_DIR="$ROOT_DIR/output_files"
 LOG_DIR="$ROOT_DIR/logs"
 VERBOSE_DIR="$LOG_DIR/gl2gh-verbose-logs"
+MAX_PARALLEL=10
 
 mkdir -p "$OUTPUT_DIR" "$LOG_DIR" "$VERBOSE_DIR"
 
@@ -58,7 +23,9 @@ FAILURE_FILE="$OUTPUT_DIR/migration-failures_$timestamp.csv"
 touch "$RUN_LOG"
 
 log() {
-  echo "[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] $*" | tee -a "$RUN_LOG"
+  local msg="[$(date -u +'%Y-%m-%dT%H:%M:%SZ')] $*"
+  echo "$msg"
+  echo "$msg" >> "$RUN_LOG"
 }
 
 fail() {
@@ -197,15 +164,12 @@ convert_pipe_list_to_comma() {
 
 capture_verbose_logs() {
   local safe_name="$1"
-
   local copied="false"
 
   while IFS= read -r file; do
     [[ -f "$file" ]] || continue
-
     local base
     base="$(basename "$file")"
-
     cp "$file" "$VERBOSE_DIR/${safe_name}_${base}_${timestamp}" 2>/dev/null || true
     copied="true"
   done < <(
@@ -220,9 +184,7 @@ capture_verbose_logs() {
   )
 
   if [[ "$copied" == "true" ]]; then
-    log "[INFO] Verbose logs captured under $VERBOSE_DIR"
-  else
-    log "[WARN] No verbose.log found for this repository"
+    log "[INFO] Verbose logs captured under $VERBOSE_DIR for $safe_name"
   fi
 }
 
@@ -284,10 +246,6 @@ build_common_args() {
     COMMON_ARGS+=(--gitlab-debug)
   fi
 
-  if [[ "${GL2GH_QUEUE_ONLY:-true}" == "true" ]]; then
-    COMMON_ARGS+=(--queue-only)
-  fi
-
   COMMON_ARGS+=(--verbose)
 }
 
@@ -311,13 +269,7 @@ run_one_migration() {
   local error_message=""
 
   log "------------------------------------------------------------"
-  log "[INFO] Row             : $row_num"
-  log "[INFO] GitLab group    : $gitlab_group"
-  log "[INFO] GitLab project  : $gitlab_project"
-  log "[INFO] GitHub org      : $github_org"
-  log "[INFO] GitHub repo     : $github_repo"
-  log "[INFO] Repo visibility : $visibility"
-  log "[INFO] Repo log        : $repo_log"
+  log "[INFO] Initiating Row $row_num: $gitlab_group/$gitlab_project -> $github_org/$github_repo"
   log "------------------------------------------------------------"
 
   EXTRA_ARGS=()
@@ -326,29 +278,32 @@ run_one_migration() {
     error_message="Both include_in_export and exclude_from_export are populated. Only one is allowed."
     log "[ERROR] $error_message"
 
-    {
-      csv_escape "$row_num"; echo -n ","
-      csv_escape "$gitlab_group"; echo -n ","
-      csv_escape "$gitlab_project"; echo -n ","
-      csv_escape "$github_org"; echo -n ","
-      csv_escape "$github_repo"; echo -n ","
-      csv_escape "$visibility"; echo -n ","
-      csv_escape "FAILED"; echo -n ","
-      csv_escape ""; echo -n ","
-      csv_escape "1"; echo -n ","
-      csv_escape "$repo_log"; echo -n ","
-      csv_escape "$error_message"; echo
-    } >> "$MIGRATION_OUTPUT_FILE"
+    (
+      flock -x 200
+      {
+        csv_escape "$row_num"; echo -n ","
+        csv_escape "$gitlab_group"; echo -n ","
+        csv_escape "$gitlab_project"; echo -n ","
+        csv_escape "$github_org"; echo -n ","
+        csv_escape "$github_repo"; echo -n ","
+        csv_escape "$visibility"; echo -n ","
+        csv_escape "FAILED"; echo -n ","
+        csv_escape ""; echo -n ","
+        csv_escape "1"; echo -n ","
+        csv_escape "$repo_log"; echo -n ","
+        csv_escape "$error_message"; echo
+      } >> "$MIGRATION_OUTPUT_FILE"
 
-    {
-      csv_escape "$row_num"; echo -n ","
-      csv_escape "$gitlab_group"; echo -n ","
-      csv_escape "$gitlab_project"; echo -n ","
-      csv_escape "$github_org"; echo -n ","
-      csv_escape "$github_repo"; echo -n ","
-      csv_escape "1"; echo -n ","
-      csv_escape "$error_message"; echo
-    } >> "$FAILURE_FILE"
+      {
+        csv_escape "$row_num"; echo -n ","
+        csv_escape "$gitlab_group"; echo -n ","
+        csv_escape "$gitlab_project"; echo -n ","
+        csv_escape "$github_org"; echo -n ","
+        csv_escape "$github_repo"; echo -n ","
+        csv_escape "1"; echo -n ","
+        csv_escape "$error_message"; echo
+      } >> "$FAILURE_FILE"
+    ) 200>"$MIGRATION_OUTPUT_FILE.lock"
 
     return 1
   fi
@@ -363,6 +318,7 @@ run_one_migration() {
 
   set +e
 
+  # 1. Run direct migration (and wait for status output)
   gh gl2gh migrate-repo \
     "${COMMON_ARGS[@]}" \
     --gitlab-group "$gitlab_group" \
@@ -379,18 +335,50 @@ run_one_migration() {
   set -e
 
   cat "$repo_log" >> "$RUN_LOG" || true
-
   migration_id="$(extract_migration_id "$repo_log")"
+
+  # 2. If initial call returned migration_id, wait for final status
+  if [[ -n "$migration_id" ]]; then
+    log "[INFO] Waiting for migration $migration_id ($github_org/$github_repo) to complete..."
+    set +e
+    gh gl2gh wait-for-migration \
+      --github-org "$github_org" \
+      --migration-id "$migration_id" \
+      --github-pat "$GH_PAT" \
+      --target-api-url "$TARGET_API_URL" >> "$repo_log" 2>&1
+    wait_rc=$?
+    set -e
+    if [[ "$wait_rc" -ne 0 ]]; then
+      exit_code=$wait_rc
+    fi
+  fi
+
   capture_verbose_logs "$safe_name"
 
   if [[ "$exit_code" -eq 0 ]]; then
-    status="STARTED"
-    log "[SUCCESS] Migration command completed for $github_org/$github_repo"
+    status="SUCCEEDED"
+    log "[SUCCESS] Migration completed successfully for $github_org/$github_repo"
   else
     status="FAILED"
     error_message="$(tail -n 30 "$repo_log" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g')"
-    log "[ERROR] Migration command failed for $github_org/$github_repo"
+    log "[ERROR] Migration failed for $github_org/$github_repo"
     log "[ERROR] Repo log: $repo_log"
+  fi
+
+  # Thread-safe write to CSV outputs
+  (
+    flock -x 200
+    if [[ "$exit_code" -ne 0 ]]; then
+      {
+        csv_escape "$row_num"; echo -n ","
+        csv_escape "$gitlab_group"; echo -n ","
+        csv_escape "$gitlab_project"; echo -n ","
+        csv_escape "$github_org"; echo -n ","
+        csv_escape "$github_repo"; echo -n ","
+        csv_escape "$exit_code"; echo -n ","
+        csv_escape "$error_message"; echo
+      } >> "$FAILURE_FILE"
+    fi
 
     {
       csv_escape "$row_num"; echo -n ","
@@ -398,26 +386,14 @@ run_one_migration() {
       csv_escape "$gitlab_project"; echo -n ","
       csv_escape "$github_org"; echo -n ","
       csv_escape "$github_repo"; echo -n ","
+      csv_escape "$visibility"; echo -n ","
+      csv_escape "$status"; echo -n ","
+      csv_escape "$migration_id"; echo -n ","
       csv_escape "$exit_code"; echo -n ","
+      csv_escape "$repo_log"; echo -n ","
       csv_escape "$error_message"; echo
-    } >> "$FAILURE_FILE"
-  fi
-
-  {
-    csv_escape "$row_num"; echo -n ","
-    csv_escape "$gitlab_group"; echo -n ","
-    csv_escape "$gitlab_project"; echo -n ","
-    csv_escape "$github_org"; echo -n ","
-    csv_escape "$github_repo"; echo -n ","
-    csv_escape "$visibility"; echo -n ","
-    csv_escape "$status"; echo -n ","
-    csv_escape "$migration_id"; echo -n ","
-    csv_escape "$exit_code"; echo -n ","
-    csv_escape "$repo_log"; echo -n ","
-    csv_escape "$error_message"; echo
-  } >> "$MIGRATION_OUTPUT_FILE"
-
-  [[ "$exit_code" -eq 0 ]]
+    } >> "$MIGRATION_OUTPUT_FILE"
+  ) 200>"$MIGRATION_OUTPUT_FILE.lock"
 }
 
 main() {
@@ -431,6 +407,7 @@ main() {
   require_cmd sed
   require_cmd awk
   require_cmd find
+  require_cmd flock
 
   require_env SOURCE_GL_SERVER_URL
   require_env TARGET_API_URL
@@ -454,8 +431,7 @@ main() {
   log "[INFO] TARGET_API_URL        : $TARGET_API_URL"
   log "[INFO] TARGET_UPLOADS_URL    : $TARGET_UPLOADS_URL"
   log "[INFO] INVENTORY_FILE        : $INVENTORY_FILE"
-  log "[INFO] MIGRATION_OUTPUT_FILE : $MIGRATION_OUTPUT_FILE"
-  log "[INFO] FAILURE_FILE          : $FAILURE_FILE"
+  log "[INFO] MAX_PARALLEL          : $MAX_PARALLEL"
 
   echo '"row","gitlab_group","gitlab_project","github_org","github_repo","gh_repo_visibility","status","migration_id","exit_code","log_file","error_message"' > "$MIGRATION_OUTPUT_FILE"
   echo '"row","gitlab_group","gitlab_project","github_org","github_repo","exit_code","error_message"' > "$FAILURE_FILE"
@@ -476,8 +452,6 @@ main() {
   [[ "$idx_github_repo" -ge 0 ]] || fail "Inventory column missing: github_repo"
 
   total=0
-  started=0
-  failed=0
   skipped=0
   row_num=1
 
@@ -506,8 +480,7 @@ main() {
 
     total=$((total + 1))
 
-    set +e
-
+    # Parallel job queue management (Limit to MAX_PARALLEL = 10)
     run_one_migration \
       "$row_num" \
       "$gitlab_group" \
@@ -516,40 +489,38 @@ main() {
       "$github_repo" \
       "$visibility" \
       "$include_in_export" \
-      "$exclude_from_export"
+      "$exclude_from_export" &
 
-    rc=$?
-
-    set -e
-
-    if [[ "$rc" -eq 0 ]]; then
-      started=$((started + 1))
-    else
-      failed=$((failed + 1))
+    if [[ "$(jobs -r -p | wc -l)" -ge "$MAX_PARALLEL" ]]; then
+      wait -n
     fi
 
   done < <(tail -n +2 "$INVENTORY_FILE")
 
-  actual_started="$(awk -F',' 'NR>1 && $7 ~ /STARTED/ {c++} END {print c+0}' "$MIGRATION_OUTPUT_FILE")"
+  # Wait for remaining background jobs to complete
+  wait
+
+  # Calculate final summary status atomically from CSV results
+  actual_succeeded="$(awk -F',' 'NR>1 && $7 ~ /SUCCEEDED/ {c++} END {print c+0}' "$MIGRATION_OUTPUT_FILE")"
   actual_failed="$(awk -F',' 'NR>1 {c++} END {print c+0}' "$FAILURE_FILE")"
 
   log "============================================================"
   log "Migration Summary"
   log "============================================================"
-  log "Total rows selected       : $total"
-  log "Total rows skipped        : $skipped"
-  log "Total migrations started  : $actual_started"
-  log "Total migrations failed   : $actual_failed"
-  log "Migration output file     : $MIGRATION_OUTPUT_FILE"
-  log "Failure file              : $FAILURE_FILE"
-  log "Run log                   : $RUN_LOG"
-  log "Verbose logs              : $VERBOSE_DIR"
+  log "Total rows selected        : $total"
+  log "Total rows skipped         : $skipped"
+  log "Total migrations succeeded : $actual_succeeded"
+  log "Total migrations failed    : $actual_failed"
+  log "Migration output file      : $MIGRATION_OUTPUT_FILE"
+  log "Failure file               : $FAILURE_FILE"
+  log "Run log                    : $RUN_LOG"
+  log "Verbose logs               : $VERBOSE_DIR"
   log "============================================================"
 
   echo "export MIGRATION_OUTPUT_FILE=$MIGRATION_OUTPUT_FILE"
 
-  if [[ "$actual_started" -eq 0 ]]; then
-    fail "No migrations were started. Check $FAILURE_FILE and $RUN_LOG"
+  if [[ "$actual_succeeded" -eq 0 && "$total" -gt 0 ]]; then
+    fail "No migrations succeeded. Check $FAILURE_FILE and $RUN_LOG"
   fi
 
   if [[ "$actual_failed" -gt 0 ]]; then
