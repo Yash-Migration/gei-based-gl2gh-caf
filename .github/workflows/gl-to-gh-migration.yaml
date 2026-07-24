@@ -292,7 +292,7 @@ jobs:
       TARGET_UPLOADS_URL: ${{ vars.TARGET_UPLOADS_URL }}
       GITLAB_API_PRIVATE_TOKEN: ${{ secrets.GITLAB_API_PRIVATE_TOKEN }}
       GH_PAT: ${{ secrets.GH_PAT }}
-      GH_TOKEN: ${{ secrets.GH_PAT }}
+      # GH_TOKEN: ${{ secrets.GH_PAT }}
     needs: [approve-after-readiness-check]
     outputs:
       MIGRATION_OUTPUT_FILE_BASENAME: ${{ steps.capture.outputs.MIGRATION_OUTPUT_FILE_BASENAME }}
@@ -302,18 +302,26 @@ jobs:
 
       - name: Install/Update GEI extension
         shell: bash
+        env:
+          # Use standard runner token or a public PAT to authenticate with public api.github.com
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          unset GH_TOKEN
-          if [[ -z "$GH_HOST" ]]; then
+
+          echo "[INFO] Installing gh-gl2gh extension from public GitHub..."
+          # Pass extension repository name (not full URL)
+          gh extension install github/gh-gl2gh --force || true
+
+          echo "[INFO] Authenticating gh CLI with Target GitHub Enterprise ($GH_HOST)..."
+          if [[ -z "${GH_HOST:-}" ]]; then
               echo "$GH_PAT" | gh auth login --with-token
           else
               echo "$GH_PAT" | gh auth login --hostname "$GH_HOST" --with-token
           fi
-          gh extension install https://github.com/github/gh-gl2gh
-          gh extension upgrade https://github.com/github/gh-gl2gh
+
+          echo "[INFO] Verifying gh-gl2gh binary availability..."
           gh gl2gh --help >/dev/null
-          
+
       - name: Setup GH CLI Extensions & Start Migration
         shell: bash
         run: |
@@ -321,6 +329,7 @@ jobs:
           echo "# gl2gh Migrations"
           echo "====================="
           set -euo pipefail
+          
           echo "[INFO] Installed Extensions:"
           gh extension list
 
@@ -337,7 +346,7 @@ jobs:
 
           MIGRATION_OUTPUT_FILE="${MIGRATION_EXPORT#export MIGRATION_OUTPUT_FILE=}"
           echo "MIGRATION_OUTPUT_FILE=$MIGRATION_OUTPUT_FILE" > start-repository-migration-output-var.env
-
+          
       - name: capture
         id: capture
         shell: bash
