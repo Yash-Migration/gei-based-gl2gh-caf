@@ -308,6 +308,15 @@ jobs:
           echo "====================="
           set -euo pipefail
 
+          unset GH_TOKEN
+          echo "$GH_PAT" | gh auth login --with-token --hostname "$GH_HOST"
+
+          gh auth status --hostname "$GH_HOST"
+
+          gh extension install https://github.com/github/gh-gl2gh \
+            || gh extension upgrade gh-gl2gh \
+            || true
+            
           # Ensure required log and output folders exist so upload-artifact doesn't fail
           mkdir -p logs output_files logs/gl2gh-verbose-logs
 
