@@ -191,13 +191,10 @@ customer-prod-env
 Jobs that use this environment:
 - `getting-env-ready`
 - `validate-prerequisites`
-- `pre-migration-readiness-check`
-- `generate-migration-archives`
-- `upload-migration-archives`
-- `start-repository-migration`
-- `display-migration-summary`
-- `monitor-repository-migrations`
-- `post-migration-validation`
+- `pre-migration-readiness-check + GitSizer Check`
+- `Manul Approval Gate`
+- `Start-Repository-Migration`
+- `Post-Migration-Validation`
 
 #### Environment Variables
 
@@ -210,8 +207,8 @@ Jobs that use this environment:
 | AZ_CONTAINER | Required only if STORAGE_TYPE = Azure |
 | AWS_BUCKET_NAME | Required only if STORAGE_TYPE = AWS |
 | AWS_REGION | Required only if STORAGE_TYPE = AWS |
-| TARGET_API_URL | |
-| TARGET_UPLOADS_URL | |
+| TARGET_API_URL | https://api.company.ghe.com |
+| TARGET_UPLOADS_URL | https://uploads.company.ghe.com  |
 
 
 
@@ -261,7 +258,7 @@ Configure required reviewers in `approvers-group` to enforce manual approvals.
    - Validates required scripts
    - Validates inventory file
 
-3. Pre-migration readiness check
+3. Pre-migration readiness + Git Sizer Check
    - Checks active GitLab merge requests and running pipelines
    - Performs a GitSizer assessment to identify repositories and files that may require review before migration
    - Uploads readiness and GitSizer reports as workflow artifacts
@@ -271,49 +268,17 @@ Configure required reviewers in `approvers-group` to enforce manual approvals.
    - Uses `approvers-group`
    - Reviewer must check readiness output before continuing
 
-5. Generate migration archives
-   - Builds `gl-exporter` Docker image if missing
-   - Generates migration archives
-   - Captures archive list
-   - Uploads archive output and logs as artifacts
-
-6. Upload migration archives
-   - Uploads archives to GitHub, Azure, or AWS storage depending on `STORAGE_TYPE`
-   - Captures uploaded archive list
-   - Uploads output and logs as artifacts
-
-7. Start repository migrations
+5. Start repository migrations
    - Starts GitLab to GitHub repository migrations
    - Produces migration output files
    - Uploads output and logs as artifacts
 
-8. Display migration summary
-   - Reads outputs from generate, upload, and start stages
-   - Displays success and failure metrics
-   - Creates `final-migration-summary.txt`
-   - Uploads summary and related artifacts
-
-9. Manual approval before monitoring
-   - Uses `approvers-group`
-   - Reviewer must check migration output before monitoring starts
-
-10. Monitor repository migrations
-    - Authenticates GitHub CLI
-    - Installs or upgrades `gh-ado2gh`
-      
-      **Note:** Repository migration monitoring is performed using GitHub migration APIs exposed through the gh-ado2gh extension.
-      
-    - Derives `TARGET_API_URL` based on `GH_HOST`
-    - Reads `output_files/migration-outputs_*.csv`
-    - Runs `gl2gh-monitor-migration-status.sh`
-    - Uploads `migration-status.csv`
-
-11. Post-migration validation
+6. Post-migration validation
     - Reads inventory file and validates successfully migrated repositories in GitHub
     - Validates branch and commit counts by running `gl-post-migration-validation.sh`
     - Uploads post-validation reports and logs
 
-12. Preserve artifacts
+7. Preserve artifacts
     - Output files, logs, summaries, and monitoring reports are uploaded as workflow artifacts.
 
 ## 7.1 Pipeline Trigger
