@@ -76,13 +76,16 @@ https://docs.github.com/en/enterprise-cloud@latest/migrations/ado/managing-acces
 ```text
 .
 ├── .github/workflows/gl-to-gh-migration.yml
+├── OperationalGuide.md
 ├── README.md
+├── Setup-Customer-Environment.md
 ├── config.sh
-├── runner.sh
-├── gl-migration-readiness-check.sh
-├── gl-gitsizer-readiness-check.sh
-├── start-gl2gh-repo-migration.sh
 ├── gitlab-stats-sample.csv
+├── gitlab-stats.csv
+├── gl-gitsizer-readiness-check.sh
+├── gl-migration-readiness-check.sh
+├── gl-post-migration-validation.sh
+├── start-gl2gh-repo-migration.sh
 ├── user_inputs.env
 ```
 
@@ -203,11 +206,14 @@ Jobs that use this environment:
 | SOURCE_GL_SERVER_URL | https://gitlab.company.com |
 | GITLAB_USERNAME | gitlab-user |
 | GH_HOST | github.com or SUBDOMAIN.ghe.com |
-| GL_EXPORTER_REPO_URL | gl-exporter repo url |
 | STORAGE_TYPE | GITHUB / AZURE / AWS |
 | AZ_CONTAINER | Required only if STORAGE_TYPE = Azure |
 | AWS_BUCKET_NAME | Required only if STORAGE_TYPE = AWS |
 | AWS_REGION | Required only if STORAGE_TYPE = AWS |
+| TARGET_API_URL | |
+| TARGET_UPLOADS_URL | |
+
+
 
 #### Environment Secrets
 
@@ -215,7 +221,6 @@ Jobs that use this environment:
 |------|-------------|
 | GITLAB_API_PRIVATE_TOKEN | GitLab token with required access |
 | GH_PAT | GitHub Personal Access Token with required scopes |
-| GLXREPO_GH_PAT | PAT required for the GL Exporter source repo |
 | AZURE_STORAGE_CONNECTION_STRING | Required only if STORAGE_TYPE = Azure |
 | AWS_ACCESS_KEY_ID | Required only if STORAGE_TYPE = AWS |
 | AWS_SECRET_ACCESS_KEY | Required only if STORAGE_TYPE = AWS |
