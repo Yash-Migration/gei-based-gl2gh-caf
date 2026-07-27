@@ -19,7 +19,7 @@ jobs:
 
     env:
       GH_TOKEN: ${{ secrets.GH_PAT }}
-      GH_HOST: siemens.ghe.com
+      GH_HOST: github.com  #siemens.ghe.com
 
     steps:
       - name: Checkout Repository
