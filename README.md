@@ -314,14 +314,9 @@ The pipeline is manually triggered from GitHub Actions.
 The pipeline uploads artifacts to support troubleshooting.
 
 Artifacts include:
-- Readiness output
-- Migration archive generation output
-- Archive upload output
-- Migration start output
-- Final migration summary
-- Monitoring status CSV
-- Output files
-- Logs
+- pre-migration-readiness-check-artifacts
+- start-repository-migration-artifacts
+- post-migration-validation-artifacts
 
 Artifact retention is configured in the workflow using `retention-days: 7`.
 
@@ -418,9 +413,18 @@ Required extensions:
  
 Manual installation commands:
 
+#### GitHub Enterprise Cloud without Data Residency
+
 ```bash
 gh extension install github/gh-gl2gh
 ```
+
+#### GitHub Enterprise Cloud with Data Residency
+
+```bash
+gh extension install https://github.com/github/gh-gl2gh
+```
+### Migration-Monitor
 
 ```bash
 gh extension install https://github.com/mona-actions/gh-migration-monitor
