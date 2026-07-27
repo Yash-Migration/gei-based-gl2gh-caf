@@ -1,5 +1,3 @@
-# This is not updated
-
 # GitLab → GitHub Migration
 
 ## Optional: Centralized Multi-Team Environment Setup (One-Time Setup)
@@ -32,22 +30,7 @@ Note: In the `setup-customer-environment.yml` please do modify `GH_HOST` for Dat
 This document provides detailed procedures to migrate source code repositories from **GitLab Server** to **GitHub**.
 
 ## 2. Requirements
-
-### 2.1 GitHub Runner Host Requirements
-- **OS:** Ubuntu
-- Required tooling validated by the pipeline:
-  - `curl`
-  - `jq`
-  - `git`
-  - `docker`
-  - `node`
-  - `npm`
-  - GitHub CLI (`gh`)
-- If the runner user has sudo access, missing packages are installed automatically by the pipeline.
-- If the runner user does not have sudo access, the pipeline fails and prints the required action items.
-- Docker access is validated. If Docker is installed but the runner user cannot run Docker commands, the runner user must be added to the Docker group.
-
-### 2.2 Access Requirements
+### 2.1 Access Requirements
 - **GitHub access** to:
   - View migration scripts stored in the project
   - Trigger the pipeline
@@ -55,12 +38,11 @@ This document provides detailed procedures to migrate source code repositories f
   - Approve protected GitHub environments
   - Monitor the migration pipeline
 
-### 2.3 Required Token Scopes
+### 2.2 Required Token Scopes
 
 #### GitLab API Token
 - Must be generated using an **admin user**.
 - Required permissions: **full API access**.
-- Used by `gl-exporter` during archive generation.
 
 #### GitHub Personal Access Token (PAT)
 Required scopes:
@@ -99,29 +81,9 @@ https://docs.github.com/en/enterprise-cloud@latest/migrations/ado/managing-acces
 ├── runner.sh
 ├── gl-migration-readiness-check.sh
 ├── gl-gitsizer-readiness-check.sh
-├── generate-gl-migration-archive.sh
-├── upload-gl-migration-archive.sh
 ├── start-gl2gh-repo-migration.sh
-├── gl2gh-monitor-migration-status.sh
-├── gl-post-migration-validation.sh
 ├── gitlab-stats-sample.csv
-└── migration_scripts/
-    ├── batch.js
-    ├── create-env-vars.js
-    ├── create-migration-source.js
-    ├── gh-api.js
-    ├── index.js
-    ├── issue.js
-    ├── migration.js
-    ├── repository.js
-    ├── start-repo-migration.js
-    ├── state.js
-    ├── team.js
-    ├── upload-to-github-blob.sh
-    ├── upload-to-azure-blob.sh
-    ├── upload-to-aws-blob.sh
-    ├── user.js
-    └── workflow.js
+├── user_inputs.env
 ```
 
 ## 4. Scripts and Purpose
@@ -131,36 +93,9 @@ https://docs.github.com/en/enterprise-cloud@latest/migrations/ado/managing-acces
 | Script | Purpose |
 |------|---------|
 | `config.sh` | Contains shared / generic variables used by multiple scripts. |
-| `runner.sh` | Runner helper / wrapper script used to execute migration operations in the runner environment. |
 | `gl-migration-readiness-check.sh` | Checks active merge requests and running pipelines before migration. |
 | `gl-gitsizer-readiness-check.sh` | Performs GitSizer analysis to identify repositories and large files. |
-| `generate-gl-migration-archive.sh` | Generates GitLab migration archives / exports for repositories defined in the inventory. |
-| `upload-gl-migration-archive.sh` | Uploads generated archives to the configured intermediate storage. |
 | `start-gl2gh-repo-migration.sh` | Starts GitLab to GitHub repository migration jobs in GitHub. |
-| `gl2gh-monitor-migration-status.sh` | Monitors repository migration status and generates `migration-status.csv`. |
-| `gl-post-migration-validation.sh` | Compares branch and commit counts between GitLab and GitHub to validate migration. |
-
-### 4.2 Scripts in `migration_scripts/` Directory
-This directory contains JavaScript modules and helper scripts used to orchestrate GitHub migration operations.
-
-| List of scripts |
-|------|
-| `batch.js` |
-| `create-env-vars.js` |
-| `create-migration-source.js` |
-| `gh-api.js` |
-| `index.js` |
-| `issue.js` |
-| `migration.js` |
-| `repository.js` |
-| `start-repo-migration.js` |
-| `state.js` |
-| `team.js` |
-| `user.js` |
-| `workflow.js` |
-| `upload-to-github-blob.sh` |
-| `upload-to-azure-blob.sh` |
-| `upload-to-aws-blob.sh` |
 
 ## 5. Pre-Migration
 
