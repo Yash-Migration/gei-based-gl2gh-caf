@@ -325,53 +325,18 @@ Artifact retention is configured in the workflow using `retention-days: 7`.
 
 ## 8. Monitor the Status of Migration
 
-Migration monitoring can be performed through the pipeline or manually.
-
-### 8.1 Automated Monitoring Through Pipeline
-The workflow includes an automated monitoring stage:
-
-```text
-monitor-repository-migrations
-```
-
-This stage:
-- Runs after migration initiation.
-- Requires approval through `approvers-group` before monitoring begins.
-- Authenticates GitHub CLI using `GH_PAT` and `GH_HOST`.
-- Installs or upgrades `gh-ado2gh`.
-- Derives `TARGET_API_URL`:
-  - `https://api.github.com` when `GH_HOST=github.com`
-  - `https://api.<GH_HOST>` when using GitHub Enterprise Cloud with Data Residency
-- Reads migration IDs from:
-
-```text
-output_files/migration-outputs_*.csv
-```
-
-- Runs:
-
-```bash
-./gl2gh-monitor-migration-status.sh
-```
-
-Generated artifact:
-
-```text
-migration-status.csv
-```
-
-### 8.2 Manual Monitoring by Migration ID
+### 8.1 Manual Monitoring by Migration ID
 
 #### GitHub Enterprise Cloud without Data Residency
 
 ```bash
-gh ado2gh wait-for-migration --migration-id <migration-id>
+gh gl2gh wait-for-migration --migration-id <migration-id>
 ```
 
 #### GitHub Enterprise Cloud with Data Residency
 
 ```bash
-gh ado2gh wait-for-migration --migration-id <migration-id> --target-api-url "https://api.SUBDOMAIN.ghe.com"
+gh gl2gh wait-for-migration --migration-id <migration-id> --target-api-url "https://api.SUBDOMAIN.ghe.com"
 ```
 
 ### 8.3 Monitor Migrations with GitHub Extension - gh-migration-monitor
@@ -395,13 +360,13 @@ gh-migration-monitor extension is not supported for GitHub Enterprise Cloud with
 #### GitHub Enterprise Cloud without Data Residency
 
 ```bash
-gh ado2gh generate-mannequin-csv --github-org "{github-org}"
+gh gl2gh generate-mannequin-csv --github-org "{github-org}"
 ```
 
 #### GitHub Enterprise Cloud with Data Residency
 
 ```bash
-gh ado2gh generate-mannequin-csv --github-org "{github-org}" --target-api-url https://api.SUBDOMAIN.ghe.com
+gh gl2gh generate-mannequin-csv --github-org "{github-org}" --target-api-url https://api.SUBDOMAIN.ghe.com
 ```
 
 ### 9.2 Update Mannequin Mapping
@@ -424,13 +389,13 @@ Open `mannequins.csv` and populate the **Target User** column with valid GitHub 
 #### GitHub Enterprise Cloud without Data Residency
 
 ```bash
-gh ado2gh reclaim-mannequin --github-org "{github-org}" --csv $CSV_FILE --skip-invitation
+gh gl2gh reclaim-mannequin --github-org "{github-org}" --csv $CSV_FILE --skip-invitation
 ```
 
 #### GitHub Enterprise Cloud with Data Residency
 
 ```bash
-gh ado2gh reclaim-mannequin --github-org "{github-org}" --csv $CSV_FILE --skip-invitation --target-api-url https://api.SUBDOMAIN.ghe.com
+gh gl2gh reclaim-mannequin --github-org "{github-org}" --csv $CSV_FILE --skip-invitation --target-api-url https://api.SUBDOMAIN.ghe.com
 ```
 
 ## 10. Appendix
@@ -446,44 +411,15 @@ https://github.com/cli/cli#installation
 The workflow automatically installs or upgrades the required GitHub CLI extensions during the `getting-env-ready` job.
 
 Required extensions:
-- `gh-gitlab-stats`
+- `gh-gl2gh`
 - `gh-migration-monitor`
-- `gh-ado2gh`
-
+ 
 Manual installation commands:
 
 ```bash
-gh extension install https://github.com/mona-actions/gh-gitlab-stats
+gh extension install github/gh-gl2gh
 ```
 
 ```bash
 gh extension install https://github.com/mona-actions/gh-migration-monitor
-```
-
-```bash
-gh extension install https://github.com/github/gh-ado2gh
-```
-
-### 10.3 Build gl-exporter Docker Image
-The pipeline builds the `gl-exporter` Docker image automatically during the archive generation stage if it is not already present.
-
-Manual build command:
-
-```bash
-cd gl_exporter
-docker build --no-cache=true -t gl-exporter .
-```
-
-Verify the image:
-
-```bash
-docker images | grep "gl-exporter"
-```
-
-Example output:
-
-```text
-REPOSITORY    TAG       IMAGE ID       CREATED        SIZE
-gl-exporter   latest    5e168437a7a1   12 hours ago   1.51GB
-ruby          3.2.1     3440a912810a   2 years ago    893MB
 ```
