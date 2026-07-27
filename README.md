@@ -99,6 +99,8 @@ https://docs.github.com/en/enterprise-cloud@latest/migrations/ado/managing-acces
 | `gl-migration-readiness-check.sh` | Checks active merge requests and running pipelines before migration. |
 | `gl-gitsizer-readiness-check.sh` | Performs GitSizer analysis to identify repositories and large files. |
 | `start-gl2gh-repo-migration.sh` | Starts GitLab to GitHub repository migration jobs in GitHub. |
+| `gl-post-migration-validation.sh` | Compare and Validate both Gitlab & GitHub Migrated Repo Contents(Branches,Commits). |
+
 
 ## 5. Pre-Migration
 
