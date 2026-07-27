@@ -15,7 +15,7 @@ jobs:
       !startsWith(github.event.ref, 'feature/') &&
       !startsWith(github.event.ref, 'bugfix/') &&
       !startsWith(github.event.ref, 'hotfix/')
-    runs-on: Siemens-Ubuntu-24.04
+    runs-on: ubuntu-latest             #Siemens-Ubuntu-24.04
 
     env:
       GH_TOKEN: ${{ secrets.GH_PAT }}
@@ -115,11 +115,13 @@ jobs:
             "SOURCE_GL_SERVER_URL"
             "GITLAB_USERNAME"
             "GH_HOST"
-            "GL_EXPORTER_REPO_URL"
+            # "GL_EXPORTER_REPO_URL"
             "STORAGE_TYPE"
             "AZ_CONTAINER"
             "AWS_BUCKET_NAME"
             "AWS_REGION"
+            "TARGET_UPLOADS_URL"
+            "TARGET_API_URL"
           )
 
           EXISTING=$(gh variable list \
@@ -152,7 +154,7 @@ jobs:
           SECRETS=(
             "GITLAB_API_PRIVATE_TOKEN"
             "GH_PAT"
-            "GLXREPO_GH_PAT"
+            # "GLXREPO_GH_PAT"
             "AZURE_STORAGE_CONNECTION_STRING"
             "AWS_ACCESS_KEY_ID"
             "AWS_SECRET_ACCESS_KEY"
